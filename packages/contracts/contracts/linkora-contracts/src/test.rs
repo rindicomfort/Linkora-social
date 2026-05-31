@@ -90,3 +90,52 @@ fn test_pool_deposit_withdraw() {
     assert_eq!(pool.balance, 800);
     assert_eq!(TokenClient::new(&env, &token).balance(&user), 9_200);
 }
+
+#[test]
+fn test_create_pool_unique_admins_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(LinkoraContract, ());
+    let client = LinkoraContractClient::new(&env, &contract_id);
+
+    let creator = Address::generate(&env);
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let admin3 = Address::generate(&env);
+    let token = setup_token(&env, &creator);
+    let pool_id = symbol_short!("mypool");
+
+    let mut admins = soroban_sdk::Vec::new(&env);
+    admins.push_back(admin1);
+    admins.push_back(admin2);
+    admins.push_back(admin3);
+
+    // Should succeed — no duplicates
+    client.create_pool(&creator, &pool_id, &token, &admins, &2u32);
+
+    let pool = client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool.balance, 0);
+    assert_eq!(pool.threshold, 2);
+    assert_eq!(pool.admins.len(), 3);
+}
+
+#[test]
+#[should_panic(expected = "duplicate admin in initial_admins")]
+fn test_create_pool_duplicate_admins_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(LinkoraContract, ());
+    let client = LinkoraContractClient::new(&env, &contract_id);
+
+    let creator = Address::generate(&env);
+    let admin1 = Address::generate(&env);
+    let token = setup_token(&env, &creator);
+    let pool_id = symbol_short!("badpool");
+
+    // admin1 appears twice — must panic
+    let mut admins = soroban_sdk::Vec::new(&env);
+    admins.push_back(admin1.clone());
+    admins.push_back(admin1.clone());
+
+    client.create_pool(&creator, &pool_id, &token, &admins, &1u32);
+}

@@ -4,6 +4,9 @@ use soroban_sdk::{
     Vec,
 };
 
+// ── Blocking Storage Key ─────────────────────────────────────────────────────
+const BLOCKS: Symbol = symbol_short!("BLOCKS");
+
 // ── Storage Keys ────────────────────────────────────────────────────────────
 
 const POSTS: Symbol = symbol_short!("POSTS");
@@ -37,6 +40,8 @@ pub struct Profile {
 pub struct Pool {
     pub token: Address,
     pub balance: i128,
+    pub admins: Vec<Address>,
+    pub threshold: u32,
 }
 
 // ── Contract ─────────────────────────────────────────────────────────────────
@@ -162,6 +167,45 @@ impl LinkoraContract {
 
     // ── Community Token Pool ──────────────────────────────────────────────────
 
+    /// Create a named community pool with an explicit admin set.
+    /// Panics if `initial_admins` contains duplicate addresses.
+    pub fn create_pool(
+        env: Env,
+        creator: Address,
+        pool_id: Symbol,
+        token: Address,
+        initial_admins: Vec<Address>,
+        threshold: u32,
+    ) {
+        creator.require_auth();
+
+        // ── Reject duplicate admins ───────────────────────────────────────────
+        let mut seen: Map<Address, bool> = Map::new(&env);
+        for admin in initial_admins.iter() {
+            assert!(
+                !seen.contains_key(admin.clone()),
+                "duplicate admin in initial_admins"
+            );
+            seen.set(admin, true);
+        }
+
+        assert!(
+            threshold > 0 && threshold <= initial_admins.len(),
+            "invalid threshold"
+        );
+
+        let key = (POOLS, pool_id);
+        env.storage().persistent().set(
+            &key,
+            &Pool {
+                token,
+                balance: 0,
+                admins: initial_admins,
+                threshold,
+            },
+        );
+    }
+
     /// Deposit tokens into a named community pool.
     pub fn pool_deposit(
         env: Env,
@@ -179,7 +223,12 @@ impl LinkoraContract {
             .storage()
             .persistent()
             .get(&key)
-            .unwrap_or(Pool { token: token.clone(), balance: 0 });
+            .unwrap_or(Pool {
+                token: token.clone(),
+                balance: 0,
+                admins: Vec::new(&env),
+                threshold: 1,
+            });
         pool.balance += amount;
         env.storage().persistent().set(&key, &pool);
     }
