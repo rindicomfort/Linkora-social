@@ -1,8 +1,9 @@
-import React, { useMemo } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
-
-import { PostCard, Post } from "../../components/PostCard";
-import { PostCardSkeleton } from "../../components/skeletons/PostCardSkeleton";
+import React from "react";
+import { FlatList, Text, StyleSheet, ActivityIndicator, RefreshControl, View } from "react-native";
+import { useRouter } from "expo-router";
+import { PostCard, PostCardSkeleton, Post } from "../../components/PostCard";
+import { EmptyState } from "../../components/states/EmptyState";
+import { ErrorState } from "../../components/states/ErrorState";
 import { useFeed } from "../../hooks/useFeed";
 import { useTheme } from "../../theme/useTheme";
 
@@ -18,33 +19,8 @@ function SkeletonList() {
   );
 }
 
-function EmptyState({ styles }: { styles: ReturnType<typeof createStyles> }) {
-  return (
-    <View style={styles.center}>
-      <Text style={styles.emptyIcon}>📭</Text>
-      <Text style={styles.emptyTitle}>No posts yet</Text>
-      <Text style={styles.emptySubtitle}>Be the first to post on Linkora!</Text>
-    </View>
-  );
-}
-
-function ErrorState({
-  message,
-  styles,
-}: {
-  message: string;
-  styles: ReturnType<typeof createStyles>;
-}) {
-  return (
-    <View style={styles.center}>
-      <Text style={styles.errorText}>{message}</Text>
-    </View>
-  );
-}
-
 export default function FeedScreen() {
-  const { theme } = useTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const router = useRouter();
   const { posts, loading, error, loadMore, refresh } = useFeed();
 
   const isInitialLoad = loading && posts.length === 0;
@@ -58,7 +34,7 @@ export default function FeedScreen() {
   }
 
   if (error && posts.length === 0) {
-    return <ErrorState message={error} styles={styles} />;
+    return <ErrorState message={error} onRetry={refresh} />;
   }
 
   return (
@@ -68,7 +44,15 @@ export default function FeedScreen() {
       data={posts}
       keyExtractor={(item) => String(item.id)}
       renderItem={({ item }) => <PostCard post={item} />}
-      ListEmptyComponent={<EmptyState styles={styles} />}
+      ListEmptyComponent={
+        <EmptyState
+          icon="📭"
+          title="No posts yet"
+          subtitle="Be the first to post on Linkora."
+          actionLabel="Explore creators"
+          onAction={() => router.push("/(tabs)/explore" as Parameters<typeof router.push>[0])}
+        />
+      }
       ListFooterComponent={
         loading && posts.length > 0 ? (
           <ActivityIndicator style={styles.footer} color={theme.colors.brand.primary} size="small" />
@@ -88,47 +72,25 @@ export default function FeedScreen() {
   );
 }
 
-function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
-  return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.surface.background,
-    },
-    listContent: {
-      paddingVertical: 8,
-    },
-    emptyContainer: {
-      flex: 1,
-    },
-    center: {
-      flex: 1,
-      backgroundColor: theme.colors.surface.background,
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 32,
-    },
-    emptyIcon: {
-      fontSize: 48,
-      marginBottom: 12,
-    },
-    emptyTitle: {
-      fontSize: 18,
-      fontWeight: "700",
-      color: theme.colors.text.primary,
-      marginBottom: 6,
-    },
-    emptySubtitle: {
-      fontSize: 14,
-      color: theme.colors.text.secondary,
-      textAlign: "center",
-    },
-    errorText: {
-      color: theme.colors.semantic.error,
-      fontSize: 14,
-      textAlign: "center",
-    },
-    footer: {
-      paddingVertical: 16,
-    },
-  });
-}
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#0f172a",
+  },
+  listContent: {
+    paddingVertical: 8,
+  },
+  emptyContainer: {
+    flex: 1,
+  },
+  center: {
+    flex: 1,
+    backgroundColor: "#0f172a",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
+  },
+  footer: {
+    paddingVertical: 16,
+  },
+});

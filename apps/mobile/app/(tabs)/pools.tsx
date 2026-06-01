@@ -1,78 +1,155 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
-
+import React from "react";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from "react-native";
+import { useRouter } from "expo-router";
 import { PoolCard } from "../../components/PoolCard";
-import { PoolCardSkeleton } from "../../components/skeletons/PoolCardSkeleton";
-import { useTheme } from "../../theme/useTheme";
+import { usePools } from "../../hooks/usePools";
+import { EmptyState } from "../../components/EmptyState";
 
-const POOLS = [
-  {
-    id: "creator-fund",
-    name: "Creator Fund",
-    description: "Shared treasury for emerging creators",
-    totalValue: "18,240 XLM",
-    participants: 128,
-    apy: "8.4%",
-  },
-  {
-    id: "music-drops",
-    name: "Music Drops",
-    description: "Funding pool for independent releases",
-    totalValue: "7,900 NOVA",
-    participants: 64,
-    apy: "6.1%",
-  },
-];
+import { EmptyState } from "../../components/states/EmptyState";
 
 export default function PoolsScreen() {
-  const { theme } = useTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const { pools, loading, error, refresh } = usePools();
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(timer);
-  }, []);
+  const handlePoolPress = (poolId: string) => {
+    router.push(`/pool/${poolId}`);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Pools</Text>
+          <Text style={styles.subtitle}>Community funding pools</Text>
+        </View>
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color="#6366f1" />
+        </View>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Pools</Text>
+          <Text style={styles.subtitle}>Community funding pools</Text>
+        </View>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={refresh}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading pools"
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (pools.length === 0) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Pools</Text>
+          <Text style={styles.subtitle}>Community funding pools</Text>
+        </View>
+        <EmptyState
+          title="No pools available"
+          message="Check back soon for community funding opportunities"
+        />
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Pools</Text>
-      <Text style={styles.subtitle}>Community funding pools</Text>
-      <View style={styles.list}>
-        {loading ? (
-          <>
-            <PoolCardSkeleton />
-            <PoolCardSkeleton />
-          </>
-        ) : (
-          POOLS.map((pool) => <PoolCard key={pool.id} {...pool} />)
-        )}
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Pools</Text>
+        <Text style={styles.subtitle}>Community funding pools</Text>
       </View>
-    </View>
+
+      <View style={styles.listContainer}>
+        {pools.map((pool) => (
+          <TouchableOpacity
+            key={pool.pool_id}
+            onPress={() => handlePoolPress(pool.pool_id)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Pool ${pool.pool_id}`}
+          >
+            <PoolCard
+              id={pool.pool_id}
+              name={pool.token}
+              description={`${pool.admins.length} admin${pool.admins.length === 1 ? "" : "s"}`}
+              totalValue={`${pool.balance.toString()}`}
+              participants={pool.admins.length}
+              onPress={() => handlePoolPress(pool.pool_id)}
+            />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
-function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
-  return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.surface.background,
-      paddingTop: 24,
-    },
-    title: {
-      fontSize: 24,
-      fontWeight: "700",
-      color: theme.colors.text.primary,
-      marginBottom: 8,
-      paddingHorizontal: 24,
-    },
-    subtitle: {
-      fontSize: 14,
-      color: theme.colors.text.secondary,
-      paddingHorizontal: 24,
-    },
-    list: {
-      marginTop: 16,
-    },
-  });
-}
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#0f172a",
+  },
+  contentContainer: {
+    paddingBottom: 24,
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 16,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#f1f5f9",
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: "#94a3b8",
+  },
+  listContainer: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  loaderContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  errorText: {
+    color: "#fca5a5",
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  retryButton: {
+    backgroundColor: "#6366f1",
+    borderRadius: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  retryButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+});

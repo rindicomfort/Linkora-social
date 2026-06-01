@@ -7,8 +7,8 @@ import { usePool, useTokenMeta, formatTokenAmount, truncateAddress } from "../..
 import { useWallet } from "../../components/WalletProvider";
 import { AdminList } from "../../components/pools/AdminList";
 import { ThresholdBadge } from "../../components/pools/ThresholdBadge";
-import { DepositTab } from "../../components/pools/DepositTab";
-import { WithdrawTab } from "../../components/pools/WithdrawTab";
+import { PoolDepositForm } from "../../components/PoolDepositForm";
+import { PoolWithdrawForm } from "../../components/PoolWithdrawForm";
 import { PoolEmptyState } from "../../components/pools/PoolEmptyState";
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ export default function PoolDetailPage() {
                   style={styles.tabPanel}
                 >
                   {activeTab === "deposit" && publicKey && (
-                    <DepositTab
+                    <PoolDepositForm
                       pool={pool}
                       tokenMeta={tokenMeta}
                       currentUser={publicKey}
@@ -237,7 +237,7 @@ export default function PoolDetailPage() {
                   style={styles.tabPanel}
                 >
                   {activeTab === "withdraw" && publicKey && (
-                    <WithdrawTab
+                    <PoolWithdrawForm
                       pool={pool}
                       tokenMeta={tokenMeta}
                       currentUser={publicKey}

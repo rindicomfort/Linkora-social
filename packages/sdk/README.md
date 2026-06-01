@@ -1,22 +1,31 @@
-# sdk
+# linkora-sdk
 
 Typed TypeScript client for `LinkoraContract`, generated from the compiled contract WASM using `stellar contract bindings typescript`.
+
+**npm**: [`linkora-sdk`](https://www.npmjs.com/package/linkora-sdk)
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-pnpm add sdk
+# npm
+npm install linkora-sdk
+
+# pnpm
+pnpm add linkora-sdk
+
+# yarn
+yarn add linkora-sdk
 ```
 
 ### 2. Instantiate the client
 
 ```ts
-import { Client } from "sdk";
+import { Client } from "linkora-sdk";
 
 const client = new Client({
-  contractId: "C...",          // deployed LinkoraContract address
+  contractId: "C...", // deployed LinkoraContract address
   networkPassphrase: "Test SDF Network ; September 2015",
   rpcUrl: "https://soroban-testnet.stellar.org",
 });
@@ -67,9 +76,23 @@ pnpm build:contracts
 
 # 2. Regenerate the TypeScript client
 bash packages/sdk/generate.sh
+
+# 3. Build the SDK for publishing (outputs to dist/)
+pnpm --filter sdk build
 ```
 
 The generated files are written to `packages/sdk/src/`. Commit them so consumers don't need the Stellar CLI installed.
+
+## Building for distribution
+
+When publishing to npm, build the TypeScript to JavaScript:
+
+```bash
+pnpm --filter sdk build
+# Outputs JavaScript and type declarations to dist/
+```
+
+This step is automated in the GitHub Actions workflow (`publish-sdk.yml`) on every `sdk/v*` tag push.
 
 ## Usage
 
@@ -81,5 +104,12 @@ import { Client } from "sdk";
 
 ## Prerequisites
 
+To regenerate the client from the compiled contract:
+
 - Stellar CLI: `cargo install --locked stellar-cli`
 - Contract built: `pnpm build:contracts`
+
+To build the SDK for distribution, you only need:
+
+- Node.js 18+
+- pnpm (or npm/yarn)

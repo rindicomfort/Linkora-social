@@ -5,9 +5,8 @@ import { useRouter } from "expo-router";
 import { PoolRow, PoolSearchResult } from "../../components/PoolRow";
 import { ProfileRow, ProfileSearchResult } from "../../components/ProfileRow";
 import { SearchBar } from "../../components/SearchBar";
-import { PoolCardSkeleton } from "../../components/skeletons/PoolCardSkeleton";
-import { ProfileCardSkeleton } from "../../components/skeletons/ProfileCardSkeleton";
-import { useTheme } from "../../theme/useTheme";
+import { EmptyState } from "../../components/states/EmptyState";
+import { ErrorState } from "../../components/states/ErrorState";
 
 const DEBOUNCE_MS = 300;
 
@@ -101,6 +100,7 @@ export default function ExploreScreen() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchNonce, setSearchNonce] = useState(0);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -139,7 +139,7 @@ export default function ExploreScreen() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery]);
+  }, [debouncedQuery, searchNonce]);
 
   const hasQuery = debouncedQuery.trim().length > 0;
   const hasResults = results.profiles.length > 0 || results.pools.length > 0;
@@ -167,20 +167,24 @@ export default function ExploreScreen() {
             </View>
           </View>
         ) : error ? (
-          <View style={styles.center}>
-            <Text style={styles.errorTitle}>Search unavailable</Text>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
+          <ErrorState message={error} onRetry={() => setSearchNonce((current) => current + 1)} />
         ) : !hasQuery ? (
-          <View style={styles.center}>
-            <Text style={styles.emptyTitle}>Search Linkora</Text>
-            <Text style={styles.emptyText}>Find creators and community pools.</Text>
-          </View>
+          <EmptyState
+            icon="🔎"
+            title="Search Linkora"
+            subtitle="Find creators and community pools."
+          />
         ) : !hasResults ? (
-          <View style={styles.center}>
-            <Text style={styles.emptyTitle}>No matches</Text>
-            <Text style={styles.emptyText}>Try another username, token, or pool name.</Text>
-          </View>
+          <EmptyState
+            icon="🧭"
+            title="No matches"
+            subtitle="Try another username, token, or pool name."
+            actionLabel="Clear search"
+            onAction={() => {
+              setQuery("");
+              setSearchNonce((current) => current + 1);
+            }}
+          />
         ) : (
           <>
             <Text style={styles.summary}>{resultSummary}</Text>
@@ -226,73 +230,46 @@ export default function ExploreScreen() {
   );
 }
 
-function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
-  return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.surface.background,
-    },
-    content: {
-      paddingBottom: 24,
-    },
-    centerContent: {
-      flexGrow: 1,
-      justifyContent: "center",
-    },
-    loadingStack: {
-      gap: 8,
-    },
-    center: {
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 32,
-    },
-    muted: {
-      color: theme.colors.text.secondary,
-      fontSize: 13,
-      marginTop: 10,
-    },
-    emptyTitle: {
-      color: theme.colors.text.primary,
-      fontSize: 18,
-      fontWeight: "800",
-      marginBottom: 6,
-    },
-    emptyText: {
-      color: theme.colors.text.secondary,
-      fontSize: 14,
-      textAlign: "center",
-    },
-    errorTitle: {
-      color: theme.colors.semantic.error,
-      fontSize: 18,
-      fontWeight: "800",
-      marginBottom: 6,
-    },
-    errorText: {
-      color: theme.colors.semantic.error,
-      fontSize: 14,
-      textAlign: "center",
-    },
-    summary: {
-      color: theme.colors.text.secondary,
-      fontSize: 12,
-      fontWeight: "700",
-      marginHorizontal: 16,
-      marginTop: 8,
-      marginBottom: 8,
-      textTransform: "uppercase",
-    },
-    section: {
-      marginTop: 8,
-    },
-    sectionTitle: {
-      color: theme.colors.text.primary,
-      fontSize: 13,
-      fontWeight: "800",
-      marginHorizontal: 16,
-      marginBottom: 4,
-      textTransform: "uppercase",
-    },
-  });
-}
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#0f172a",
+  },
+  content: {
+    paddingBottom: 24,
+  },
+  centerContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+  },
+  center: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
+  },
+  muted: {
+    color: "#94a3b8",
+    fontSize: 13,
+    marginTop: 10,
+  },
+  summary: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "700",
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  section: {
+    marginTop: 8,
+  },
+  sectionTitle: {
+    color: "#e2e8f0",
+    fontSize: 13,
+    fontWeight: "800",
+    marginHorizontal: 16,
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+});

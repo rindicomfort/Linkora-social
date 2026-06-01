@@ -1,8 +1,10 @@
 import { Tabs, useRouter } from "expo-router";
 import { useEffect } from "react";
-import { Linking, StyleSheet, Text, TouchableOpacity } from "react-native";
+import { Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { NetworkProvider } from "../context/NetworkContext";
 import { WalletProvider } from "../context/WalletContext";
+import { useNetwork } from "../hooks/useNetwork";
 import { useWallet } from "../hooks/useWallet";
 import { parseDeepLink } from "../utils/deepLinks";
 import { ToastProvider } from "../context/ToastContext";
@@ -36,6 +38,33 @@ function HeaderWalletAddress() {
         {connected && address ? shortAddress(address) : "Connect"}
       </Text>
     </TouchableOpacity>
+  );
+}
+
+function HeaderNetworkBadge() {
+  const router = useRouter();
+  const { network, isMainnet } = useNetwork();
+
+  return (
+    <TouchableOpacity
+      style={[styles.networkBadge, isMainnet && styles.networkBadgeMainnet]}
+      onPress={() => router.push("/settings" as Parameters<typeof router.push>[0])}
+      accessibilityRole="button"
+      accessibilityLabel={`Open network settings. Active network ${network.label}`}
+    >
+      <Text style={[styles.networkBadgeText, isMainnet && styles.networkBadgeTextMainnet]}>
+        {network.label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function HeaderActions() {
+  return (
+    <View style={styles.headerActions}>
+      <HeaderNetworkBadge />
+      <HeaderWalletAddress />
+    </View>
   );
 }
 
@@ -92,47 +121,47 @@ export default function RootLayout() {
 
   return (
     <WalletProvider>
-      <ToastProvider>
-        <Tabs
-          screenOptions={{
-            headerShown: true,
-            headerStyle: {
-              backgroundColor: theme.colors.surface.background,
-            },
-            headerTitleStyle: {
-              color: theme.colors.text.primary,
-              fontWeight: "700",
-            },
-            headerTintColor: theme.colors.text.primary,
-            headerRight: () => <HeaderWalletAddress />,
-            tabBarActiveTintColor: theme.colors.brand.primary,
-            tabBarInactiveTintColor: theme.colors.text.secondary,
-            tabBarStyle: {
-              backgroundColor: theme.colors.surface.background,
-              borderTopColor: theme.colors.surface.border,
-            },
-          }}
-        >
-          <Tabs.Screen name="(tabs)/feed" options={{ title: "Feed", tabBarLabel: "Feed" }} />
-          <Tabs.Screen name="(tabs)/explore" options={{ title: "Explore", tabBarLabel: "Explore" }} />
-          <Tabs.Screen name="(tabs)/pools" options={{ title: "Pools", tabBarLabel: "Pools" }} />
-          <Tabs.Screen
-            name="(tabs)/mini-apps"
-            options={{ title: "Mini Apps", tabBarLabel: "Mini Apps" }}
-          />
-          <Tabs.Screen name="(tabs)/profile" options={{ title: "Profile", tabBarLabel: "Profile" }} />
-          <Tabs.Screen name="settings" options={{ href: null, title: "Settings" }} />
-          <Tabs.Screen name="settings/blocked" options={{ href: null, title: "Blocked Users" }} />
-          <Tabs.Screen name="connect" options={{ href: null, title: "Connect Wallet" }} />
-          {/* Detail screens — hidden from tab bar */}
-          <Tabs.Screen name="post/[id]" options={{ href: null, headerShown: true, title: "Post" }} />
-          <Tabs.Screen
-            name="profile/[address]"
-            options={{ href: null, headerShown: true, title: "Profile" }}
-          />
-          <Tabs.Screen name="pool/[id]" options={{ href: null, headerShown: true, title: "Pool" }} />
-        </Tabs>
-      </ToastProvider>
+      <Tabs
+        screenOptions={{
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: "#0f172a",
+          },
+          headerTitleStyle: {
+            color: "#f8fafc",
+            fontWeight: "700",
+          },
+          headerTintColor: "#f8fafc",
+          headerRight: () => <HeaderWalletAddress />,
+          tabBarActiveTintColor: "#6366f1",
+          tabBarInactiveTintColor: "#9ca3af",
+          tabBarStyle: {
+            backgroundColor: "#0f172a",
+            borderTopColor: "#1e293b",
+          },
+        }}
+      >
+        <Tabs.Screen name="(tabs)/feed" options={{ title: "Feed", tabBarLabel: "Feed" }} />
+        <Tabs.Screen name="(tabs)/explore" options={{ title: "Explore", tabBarLabel: "Explore" }} />
+        <Tabs.Screen name="(tabs)/pools" options={{ title: "Pools", tabBarLabel: "Pools" }} />
+        <Tabs.Screen
+          name="(tabs)/mini-apps"
+          options={{ title: "Mini Apps", tabBarLabel: "Mini Apps" }}
+        />
+        <Tabs.Screen name="(tabs)/profile" options={{ title: "Profile", tabBarLabel: "Profile" }} />
+        <Tabs.Screen name="connect" options={{ href: null, title: "Connect Wallet" }} />
+        {/* Detail screens — hidden from tab bar */}
+        <Tabs.Screen name="post/[id]" options={{ href: null, headerShown: true, title: "Post" }} />
+        <Tabs.Screen
+          name="mini-app/[id]"
+          options={{ href: null, headerShown: true, title: "Mini App" }}
+        />
+        <Tabs.Screen
+          name="profile/[address]"
+          options={{ href: null, headerShown: true, title: "Profile" }}
+        />
+        <Tabs.Screen name="pool/[id]" options={{ href: null, headerShown: true, title: "Pool" }} />
+      </Tabs>
     </WalletProvider>
   );
 }
@@ -152,5 +181,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     fontFamily: "monospace",
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginRight: 12,
+  },
+  networkBadge: {
+    minHeight: 32,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0f172a",
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  networkBadgeMainnet: {
+    backgroundColor: "#3f1d1d",
+    borderColor: "#7f1d1d",
+  },
+  networkBadgeText: {
+    color: "#cbd5e1",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  networkBadgeTextMainnet: {
+    color: "#fecaca",
   },
 });

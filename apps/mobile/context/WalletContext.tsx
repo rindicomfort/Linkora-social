@@ -15,6 +15,7 @@ import {
   getConnectionState,
   deleteConnectionState,
 } from "../utils/secureStorage";
+import { useNetworkContext, type NetworkPreset } from "./NetworkContext";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,7 +40,9 @@ interface StoredConnectionState {
 }
 
 interface WalletConnectLike {
-  connect: () => Promise<{ publicKey?: string; address?: string }>;
+  connect: (
+    network: NetworkPreset
+  ) => Promise<{ publicKey?: string; address?: string }>;
   disconnect: () => Promise<void>;
   getPublicKey?: () => Promise<string>;
   isConnected?: () => Promise<boolean>;
@@ -56,7 +59,7 @@ async function createWalletConnectAdapter(): Promise<WalletConnectLike> {
   let currentAddress: string | null = null;
 
   return {
-    async connect() {
+    async connect(network: NetworkPreset) {
       if (!projectId) {
         throw new Error("WalletConnect project id not configured");
       }
@@ -77,7 +80,7 @@ async function createWalletConnectAdapter(): Promise<WalletConnectLike> {
         requiredNamespaces: {
           stellar: {
             methods: ["stellar_signXDR"],
-            chains: ["stellar:testnet"],
+            chains: [network.chain],
             events: ["accountsChanged"],
           },
         },
@@ -161,6 +164,7 @@ interface WalletProviderProps {
 }
 
 export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
+  const { network: selectedNetwork } = useNetworkContext();
   const [state, setState] = useState<WalletState>("loading");
   const [network, setNetwork] = useState<WalletNetwork>("TESTNET");
   const [wallet, setWallet] = useState<WalletInfo>({
@@ -274,7 +278,7 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
           if (currentAddress === storedAddress) {
             setWallet({
               address: currentAddress,
-              network,
+              network: selectedNetwork.label,
               provider: "walletconnect",
             });
             setState("connected");
@@ -292,7 +296,7 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
       setState("error");
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [network, walletKit]);
+  }, [walletKit, selectedNetwork.label]);
 
   useEffect(() => {
     if (walletKit) {
@@ -316,7 +320,9 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
             throw new Error("WalletConnect is not available");
           }
 
-          const result: { publicKey?: string; address?: string } = await walletKit.connect();
+          const result: { publicKey?: string; address?: string } = await walletKit.connect(
+            selectedNetwork
+          );
           address = result.publicKey ?? result.address ?? null;
 
           if (typeof walletKit.getPublicKey === "function") {
@@ -336,7 +342,7 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
 
         await Promise.all([setWalletAddress(address), setConnectionState(connState)]);
 
-        setWallet({ address, network, provider });
+        setWallet({ address, network: selectedNetwork.label, provider });
         setState("connected");
       } catch (err) {
         setState("error");
@@ -344,7 +350,7 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
         setWallet({ address: null, network: null, provider: null });
       }
     },
-    [network, requestFreighterAddress, walletKit]
+    [requestFreighterAddress, selectedNetwork, walletKit]
   );
 
   // Disconnect
@@ -368,15 +374,13 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
   }, [checkConnectionState]);
 
   useEffect(() => {
-    setWallet((current) =>
-      current.address
-        ? {
-            ...current,
-            network,
-          }
-        : current
-    );
-  }, [network]);
+    if (wallet.address) {
+      setWallet((current) => ({
+        ...current,
+        network: selectedNetwork.label,
+      }));
+    }
+  }, [selectedNetwork.label, wallet.address]);
 
   const value: WalletContextType = {
     state,

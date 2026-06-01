@@ -1,12 +1,42 @@
 {
-  "name": "sdk",
-  "version": "0.0.1",
-  "private": true,
-  "main": "./src/index.ts",
+  "name": "linkora-sdk",
+  "version": "0.1.0",
+  "description": "Typed TypeScript client for LinkoraContract on Stellar",
+  "homepage": "https://github.com/Epta-Node/Linkora-social#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Epta-Node/Linkora-social.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Epta-Node/Linkora-social/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Linkora Contributors",
+  "keywords": [
+    "stellar",
+    "soroban",
+    "linkora",
+    "sdk",
+    "typescript",
+    "client"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "build": "echo \"Run generate.sh to regenerate the client from the contract WASM\"",
+    "build": "tsc --outDir dist --declaration --declarationMap --sourceMap --module commonjs --target ES2020 --moduleResolution node --esModuleInterop --skipLibCheck",
     "docs": "typedoc --out docs src/index.ts --tsconfig tsconfig.json",
     "test": "jest",
     "test:e2e": "jest --testPathPattern=e2e.test.ts"
@@ -21,10 +51,15 @@
     "typedoc": "^0.26.11",
     "typescript": "^5.8.3"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testMatch": ["**/__tests__/**/*.test.ts"],
+    "testMatch": [
+      "**/__tests__/**/*.test.ts"
+    ],
     "collectCoverageFrom": [
       "src/**/*.ts",
       "!src/**/*.d.ts",
