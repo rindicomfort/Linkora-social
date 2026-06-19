@@ -3524,17 +3524,9 @@ mod oracle_tests {
         let report_cbor = Bytes::from_slice(&env, report);
         let signature = sign_report(&env, &sk, report);
 
-        client.verify_analytics_attestation(
-            &symbol_short!("default"),
-            &report_cbor,
-            &signature,
-        );
+        client.verify_analytics_attestation(&symbol_short!("default"), &report_cbor, &signature);
         // Second identical call must panic.
-        client.verify_analytics_attestation(
-            &symbol_short!("default"),
-            &report_cbor,
-            &signature,
-        );
+        client.verify_analytics_attestation(&symbol_short!("default"), &report_cbor, &signature);
     }
 
     #[test]

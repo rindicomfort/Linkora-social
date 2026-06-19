@@ -33,7 +33,7 @@ pub enum StorageKey {
     GovConfig,             // persistent: governance configuration
     GovProposalCount,      // persistent: next proposal id counter
     // ── Analytics Oracle ──────────────────────────────────────────────────
-    OracleKey(Symbol),               // persistent: oracle_name -> BytesN<32> Ed25519 pubkey
+    OracleKey(Symbol), // persistent: oracle_name -> BytesN<32> Ed25519 pubkey
     AttestationNullifier(BytesN<32>), // persistent: sha256(report_cbor) -> bool (replay guard)
 }
 
