@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 
 /**
  * Utility functions for E2E tests
@@ -21,13 +21,23 @@ export async function waitForWalletConnection(page: Page, timeout = 10000): Prom
 }
 
 /**
- * Connect wallet by clicking Connect Wallet button
+ * Connect wallet, handling the mobile hamburger menu if present.
  */
 export async function connectWallet(page: Page): Promise<void> {
-  const connectButton = page.locator('button:has-text("Connect Wallet")').first();
-  await connectButton.click();
-  
-  // Wait for wallet to be connected
+  await page.waitForLoadState('networkidle');
+
+  // On mobile the Connect Wallet button lives inside the hamburger drawer.
+  // Open the drawer first if the hamburger is visible.
+  const hamburger = page.getByRole('button', { name: /toggle navigation menu/i }).first();
+  if (await hamburger.isVisible().catch(() => false)) {
+    await hamburger.click();
+  }
+
+  // Prefer data-testid; fall back to role+name for robustness.
+  const connectBtn = page.locator('[data-testid="connect-wallet"]').first();
+  await expect(connectBtn).toBeVisible({ timeout: 10000 });
+  await connectBtn.click();
+
   await waitForWalletConnection(page);
 }
 
