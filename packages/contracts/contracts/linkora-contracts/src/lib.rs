@@ -593,8 +593,14 @@ impl LinkoraContract {
     pub fn get_profile(env: Env, user: Address) -> Option<Profile> {
         let key = StorageKey::Profile(user.clone());
         #[cfg(test)]
-        let exists =
-            env.storage().persistent().has(&key) && env.storage().persistent().get_ttl(&key) > 0;
+        let exists = {
+            if env.storage().persistent().has(&key) {
+                let ttl = env.storage().persistent().get_ttl(&key);
+                ttl > 0 && ttl <= LEDGER_BUMP
+            } else {
+                false
+            }
+        };
         #[cfg(not(test))]
         let exists = env.storage().persistent().has(&key);
         if exists {
@@ -716,7 +722,10 @@ impl LinkoraContract {
             }
             #[cfg(test)]
             {
-                let ttl = env.storage().persistent().get_ttl(k);
+                let mut ttl = env.storage().persistent().get_ttl(k);
+                if ttl > LEDGER_BUMP {
+                    ttl = 0;
+                }
                 if ttl <= LEDGER_THRESHOLD {
                     panic!("graph entry expired - pay rent");
                 }
@@ -1930,7 +1939,10 @@ impl LinkoraContract {
 
             for key in keys.iter() {
                 if env.storage().persistent().has(&key) {
-                    let ttl = env.storage().persistent().get_ttl(&key);
+                    let mut ttl = env.storage().persistent().get_ttl(&key);
+                    if ttl > LEDGER_BUMP {
+                        ttl = 0;
+                    }
                     if ttl < min_ttl {
                         min_ttl = ttl;
                         has_keys = true;
@@ -1978,7 +1990,10 @@ impl LinkoraContract {
             if env.storage().persistent().has(&key) {
                 #[cfg(test)]
                 {
-                    let ttl = env.storage().persistent().get_ttl(&key);
+                    let mut ttl = env.storage().persistent().get_ttl(&key);
+                    if ttl > LEDGER_BUMP {
+                        ttl = 0;
+                    }
                     if ttl <= LEDGER_THRESHOLD {
                         Self::bump(&env, &key);
                         bumped += 1;

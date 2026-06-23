@@ -3331,13 +3331,14 @@ fn test_get_rent_expiry_minimum() {
 
     client.set_profile(&user, &String::from_str(&env, "alice"), &token);
 
-    // Modify the TTL of followers count key to be lower
-    let followers_count_key = StorageKey::FollowersCount(user.clone());
-    env.as_contract(&client.address, || {
-        env.storage()
-            .persistent()
-            .extend_ttl(&followers_count_key, 100_000, 100_000);
+    // Advance sequence by 435,000. Now all user keys have TTL of 100,000.
+    env.ledger().with_mut(|li| {
+        li.sequence_number += 435_000;
     });
+
+    // Update profile. This bumps the Profile and UsernameIndex keys to 535,000,
+    // but leaves FollowingCount and FollowersCount keys at TTL 100,000.
+    client.set_profile(&user, &String::from_str(&env, "alice"), &token);
 
     let expected_expiry = env.ledger().sequence() + 100_000;
     assert_eq!(client.get_rent_expiry(&user), expected_expiry);
