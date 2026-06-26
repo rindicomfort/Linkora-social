@@ -58,7 +58,10 @@ export default function ProfilePage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerType, setDrawerType] = useState<"followers" | "following">("followers");
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [followLoading, setFollowLoading] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blocking, setBlocking] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   /* ── Optimistic follow state ────────────────────────────────────────── */
 
@@ -162,6 +165,55 @@ export default function ProfilePage() {
       setFollowLoading(false);
     }
   }, [currentUserAddress, address, followState, followLoading]);
+
+  /* ── Check if blocked ──────────────────────────────────────────────── */
+
+  useEffect(() => {
+    if (!currentUserAddress || currentUserAddress === address) {
+      setIsBlocked(false);
+      return;
+    }
+    const client = new LinkoraClient({
+      contractId: process.env.NEXT_PUBLIC_CONTRACT_ID || "CDUMMY",
+      rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || "https://soroban-testnet.stellar.org",
+    });
+    client.isBlocked(currentUserAddress, address).then(setIsBlocked).catch(() => setIsBlocked(false));
+  }, [currentUserAddress, address]);
+
+  /* ── Block / Unblock ──────────────────────────────────────────────── */
+
+  const handleBlockToggle = useCallback(async () => {
+    if (!currentUserAddress) return;
+    setBlocking(true);
+    try {
+      const client = new LinkoraClient({
+        contractId: process.env.NEXT_PUBLIC_CONTRACT_ID || "CDUMMY",
+        rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || "https://soroban-testnet.stellar.org",
+      });
+      const _txXdr = isBlocked
+        ? client.unblockUser(currentUserAddress, address)
+        : client.blockUser(currentUserAddress, address);
+      setIsBlocked((prev) => !prev);
+      setMenuOpen(false);
+    } catch (error) {
+      console.error("Block/unblock failed:", error);
+    } finally {
+      setBlocking(false);
+    }
+  }, [currentUserAddress, address, isBlocked]);
+
+  /* ── Close overflow menu on outside click ─────────────────────────── */
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
 
   /* ── Copy address ───────────────────────────────────────────────────── */
 
@@ -304,28 +356,70 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Follow / Unfollow */}
-          <div className="mt-4 md:mt-0 shrink-0" aria-live="polite">
+          {/* Follow / Unfollow + Overflow menu */}
+          <div className="mt-4 md:mt-0 shrink-0 flex items-center gap-2" aria-live="polite">
             {!isSelf && currentUserAddress && (
-              <button
-                onClick={handleFollowToggle}
-                id="follow-btn"
-                disabled={followLoading}
-                className={`px-6 py-2 rounded-full font-bold transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
-                  followState.isFollowing
-                    ? "bg-transparent border border-[var(--text-muted)] text-[var(--text-primary)] hover:bg-[var(--error)] hover:border-[var(--error)] hover:text-white"
-                    : "bg-[var(--accent-coral)] text-white hover:opacity-90"
-                }`}
-                aria-label={
-                  followLoading
-                    ? "Updating follow status..."
-                    : followState.isFollowing
+              <>
+                <button
+                  onClick={handleFollowToggle}
+                  id="follow-btn"
+                  className={`px-6 py-2 rounded-full font-bold transition-all ${
+                    followState.isFollowing
+                      ? "bg-transparent border border-[var(--text-muted)] text-[var(--text-primary)] hover:bg-[var(--error)] hover:border-[var(--error)] hover:text-white"
+                      : "bg-[var(--accent-coral)] text-white hover:opacity-90"
+                  }`}
+                  aria-label={
+                    followState.isFollowing
                       ? `Unfollow ${profile.username}`
                       : `Follow ${profile.username}`
-                }
-              >
-                {followLoading ? "Updating..." : followState.isFollowing ? "Following" : "Follow"}
-              </button>
+                  }
+                >
+                  {followState.isFollowing ? "Following" : "Follow"}
+                </button>
+
+                {/* Overflow menu trigger */}
+                <div ref={menuRef} className="relative">
+                  <button
+                    onClick={() => setMenuOpen((prev) => !prev)}
+                    className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-[var(--bg-tertiary)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    aria-label="More actions"
+                    aria-expanded={menuOpen}
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                    </svg>
+                  </button>
+
+                  {/* Dropdown menu */}
+                  {menuOpen && (
+                    <div className="absolute right-0 top-full mt-2 z-50 min-w-[180px] rounded-xl border border-[var(--border)] bg-[var(--muted)] p-1.5 shadow-2xl">
+                      <button
+                        onClick={handleBlockToggle}
+                        disabled={blocking}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
+                      >
+                        {blocking ? (
+                          <span className="animate-pulse">Processing...</span>
+                        ) : isBlocked ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                            </svg>
+                            Unblock @{profile.username}
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                            Block @{profile.username}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </section>

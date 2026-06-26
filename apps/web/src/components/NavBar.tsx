@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@/hooks/useWallet";
@@ -18,9 +18,50 @@ export function NavBar() {
   const { address, connected, network, connect, disconnect } = useWallet();
   const { unreadCount } = useNotificationsContext();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showFreighterBanner, setShowFreighterBanner] = useState(false);
+
+  const handleConnect = useCallback(async () => {
+    const hasFreighter =
+      typeof window !== "undefined" &&
+      !!(window as unknown as { freighter?: unknown }).freighter;
+    if (!hasFreighter) {
+      setShowFreighterBanner(true);
+      return;
+    }
+    await connect();
+  }, [connect]);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-sm">
+      {/* Freighter not-installed banner */}
+      {showFreighterBanner && (
+        <div className="flex items-center justify-between gap-4 bg-amber-950/60 border-b border-amber-700/50 px-4 py-2.5 text-sm" role="alert">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-400 font-bold">Freighter not detected.</span>
+            <span className="text-amber-200/80">
+              Install the{" "}
+              <a
+                href="https://freighter.app"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-semibold text-amber-300 hover:text-amber-200"
+              >
+                Freighter browser extension
+              </a>{" "}
+              to connect your wallet.
+            </span>
+          </div>
+          <button
+            onClick={() => setShowFreighterBanner(false)}
+            className="shrink-0 text-amber-400/70 hover:text-amber-300 transition-colors"
+            aria-label="Dismiss banner"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       <nav className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         {/* Brand */}
         <a
@@ -109,7 +150,7 @@ export function NavBar() {
             </>
           ) : (
             <button
-              onClick={connect}
+              onClick={handleConnect}
               className="rounded-lg bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-500 transition-colors"
               aria-label="Connect Freighter wallet"
             >

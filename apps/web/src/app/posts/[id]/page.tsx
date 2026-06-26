@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { LinkoraClient } from "linkora-sdk";
@@ -18,6 +18,13 @@ export default function PostDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const handleCopyLink = useCallback(async () => {
+    await navigator.clipboard.writeText(window.location.href);
+    setCopyFeedback(true);
+    setTimeout(() => setCopyFeedback(false), 1500);
+  }, []);
 
   useEffect(() => {
     if (!postId) {
@@ -124,6 +131,29 @@ export default function PostDetailPage() {
               {new Date(Number(post.timestamp) * 1000).toLocaleString()}
             </span>
           </div>
+
+          {/* Share / Copy link */}
+          <button
+            onClick={handleCopyLink}
+            className="ml-auto flex items-center gap-1.5 text-[var(--text-muted)] hover:text-violet-400 transition-colors"
+            aria-label="Copy post link to clipboard"
+          >
+            {copyFeedback ? (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+                <span className="font-semibold text-violet-400">Copied!</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
+                </svg>
+                <span className="font-semibold">Share</span>
+              </>
+            )}
+          </button>
         </div>
       </article>
     </main>
