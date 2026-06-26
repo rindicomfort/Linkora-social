@@ -1,5 +1,12 @@
-import React from "react";
-import { FlatList, StyleSheet, ActivityIndicator, RefreshControl, View } from "react-native";
+import React, { useEffect } from "react";
+import {
+  FlatList,
+  StyleSheet,
+  ActivityIndicator,
+  RefreshControl,
+  View,
+  AppState,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { PostCard, Post } from "../../components/PostCard";
 import { PostCardSkeleton } from "../../components/skeletons/PostCardSkeleton";
@@ -24,6 +31,17 @@ export default function FeedScreen() {
   const router = useRouter();
   const { theme } = useTheme();
   const { posts, loading, error, loadMore, refresh } = useFeed();
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active") {
+        refresh();
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [refresh]);
 
   const isInitialLoad = loading && posts.length === 0;
 
