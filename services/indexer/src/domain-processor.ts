@@ -14,7 +14,9 @@ import { IngestEvent, QueryResultLike } from "./pipeline";
 import { handleFollow } from "./handlers/follow";
 import { handleTip } from "./handlers/tip";
 import { handleLike } from "./handlers/like";
+import { handleProfileSet } from "./handlers/profile";
 import { dispatchNotificationForBusEvent } from "./notifications/events";
+import { Database } from "./db";
 
 const TOPIC_FOLLOW = "follow";
 const TOPIC_UNFOLLOW = "unfollow";
@@ -22,6 +24,9 @@ const TOPIC_TIP = "tip";
 const TOPIC_TIP_RECEIVED = "tip_received";
 const TOPIC_LIKE = "like";
 const TOPIC_LIKE_RECEIVED = "like_received";
+const TOPIC_PROFILE_SET = "profile_set";
+const TOPIC_POST_CREATED = "post_created";
+const TOPIC_POST_DELETED = "post_deleted";
 
 function toBusEvent(ev: IngestEvent): import("./bus").BusEvent {
   return {
@@ -46,7 +51,8 @@ function asString(value: unknown): string {
 
 export function createDomainProcessor(
   pool: { query: (sql: string, params?: unknown[]) => Promise<QueryResultLike> },
-  notificationService: import("./notifications/service").NotificationService
+  notificationService: import("./notifications/service").NotificationService,
+  db?: Database
 ): (client: PgClientLike, event: IngestEvent) => Promise<void> {
   return async (client: PgClientLike, event: IngestEvent): Promise<void> => {
     const data = event.data as Record<string, unknown>;
@@ -127,8 +133,52 @@ export function createDomainProcessor(
         break;
       }
 
+      case TOPIC_PROFILE_SET: {
+        if (!db) break;
+        const user = asString(data.user ?? data.address);
+        const username = asString(data.username);
+        const creator_token = asString(data.creator_token ?? data.creatorToken ?? "");
+
+        await handleProfileSet(db, {
+          user,
+          username,
+          creator_token,
+          ledger: event.ledgerSequence,
+        });
+        break;
+      }
+
+      case TOPIC_POST_CREATED: {
+        if (!db) break;
+        const id = asBigInt(data.id ?? data.post_id);
+        const author = asString(data.author);
+        const content = asString(data.content ?? "");
+
+        await db.insertPost({
+          id,
+          author,
+          deleted: false,
+          tip_total: 0n,
+          like_count: 0n,
+          created_ledger: event.ledgerSequence,
+          deleted_ledger: null,
+          // Pass content along for storage — postgres-db.ts reads it from the object
+          ...(content ? { content } : {}),
+        } as Parameters<Database["insertPost"]>[0]);
+        break;
+      }
+
+      case TOPIC_POST_DELETED: {
+        if (!db) break;
+        const postId = asBigInt(data.post_id ?? data.id);
+
+        await db.markPostDeleted(postId, event.ledgerSequence);
+        break;
+      }
+
       default:
         break;
     }
   };
 }
+

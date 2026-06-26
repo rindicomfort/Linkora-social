@@ -184,7 +184,7 @@ async function main(): Promise<void> {
   const pipeline = new IngestPipeline(pgPool, {
     streamId: CONTRACT_ID,
     bus,
-    domainProcessor: createDomainProcessor(pgPool, notificationService),
+    domainProcessor: createDomainProcessor(pgPool, notificationService, new PostgresDatabase(pgPool)),
   });
 
   const processBatch: BatchProcessor = async (events) => {
