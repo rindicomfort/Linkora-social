@@ -27,6 +27,11 @@ import {
 } from "./handlers/moderation";
 import { handleBlock, handleUnblock, handleDmKeyPublished } from "./handlers/user";
 import { handleProfileSet } from "./handlers/profile";
+import {
+  handlePoolCreated,
+  handlePoolDeposit,
+  handlePoolWithdraw,
+} from "./handlers/pool";
 import { Database } from "./db";
 import { dispatchNotificationForBusEvent } from "./notifications/events";
 import { scValToNative, xdr } from "@stellar/stellar-sdk";
@@ -396,6 +401,55 @@ export function createDomainProcessor(
         const postId = asBigInt(data.post_id ?? data.id);
 
         await db.markPostDeleted(postId, event.ledgerSequence);
+        break;
+      }
+
+      case "pool_created": {
+        if (!db) break;
+        const pool_id = asString(data.pool_id);
+        const token = asString(data.token);
+        const admins = Array.isArray(data.admins) ? data.admins.map(asString) : [];
+        const threshold = Number(data.threshold) || 1;
+
+        await handlePoolCreated(db, {
+          pool_id,
+          token,
+          admins,
+          threshold,
+          ledger: event.ledgerSequence,
+        });
+        break;
+      }
+
+      case "pool_deposit": {
+        if (!db) break;
+        const pool_id = asString(data.pool_id);
+        const depositor = asString(data.depositor ?? data.user ?? data.from);
+        const token = asString(data.token);
+        const amount = asBigInt(data.amount);
+
+        await handlePoolDeposit(db, {
+          pool_id,
+          depositor,
+          token,
+          amount,
+          ledger: event.ledgerSequence,
+        });
+        break;
+      }
+
+      case "pool_withdraw": {
+        if (!db) break;
+        const pool_id = asString(data.pool_id);
+        const recipient = asString(data.recipient ?? data.user ?? data.to);
+        const amount = asBigInt(data.amount);
+
+        await handlePoolWithdraw(db, {
+          pool_id,
+          recipient,
+          amount,
+          ledger: event.ledgerSequence,
+        });
         break;
       }
 

@@ -179,6 +179,79 @@ describe("domain-processor: post_deleted", () => {
   });
 });
 
+// ── pool events ───────────────────────────────────────────────────────────────────
+
+describe("domain-processor: pool_created", () => {
+  it("calls db.insertPool with mapped fields", async () => {
+    const db = makeDb();
+    const processor = createDomainProcessor(makePool(), makeNotificationService(), db);
+    const client = makePgClient();
+
+    await processor(
+      client,
+      makeIngestEvent("pool_created", {
+        pool_id: "P123",
+        token: "TOKEN_A",
+        admins: ["A1", "A2"],
+        threshold: 2,
+      })
+    );
+
+    expect(db.insertPool).toHaveBeenCalledWith({
+      pool_id: "P123",
+      token: "TOKEN_A",
+      balance: 0n,
+      admins: ["A1", "A2"],
+      threshold: 2,
+      created_ledger: 100,
+      updated_ledger: 100,
+    });
+  });
+
+  it("does nothing when db is not provided", async () => {
+    const processor = createDomainProcessor(makePool(), makeNotificationService());
+    await expect(
+      processor(makePgClient(), makeIngestEvent("pool_created", { pool_id: "P1" }))
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("domain-processor: pool_deposit", () => {
+  it("calls db.adjustPoolBalance with amount", async () => {
+    const db = makeDb();
+    const processor = createDomainProcessor(makePool(), makeNotificationService(), db);
+    const client = makePgClient();
+
+    await processor(
+      client,
+      makeIngestEvent("pool_deposit", {
+        pool_id: "P123",
+        amount: 500n,
+      })
+    );
+
+    expect(db.adjustPoolBalance).toHaveBeenCalledWith("P123", 500n, 100);
+  });
+});
+
+describe("domain-processor: pool_withdraw", () => {
+  it("calls db.adjustPoolBalance with negative amount", async () => {
+    const db = makeDb();
+    const processor = createDomainProcessor(makePool(), makeNotificationService(), db);
+    const client = makePgClient();
+
+    await processor(
+      client,
+      makeIngestEvent("pool_withdraw", {
+        pool_id: "P123",
+        amount: 200n,
+      })
+    );
+
+    expect(db.adjustPoolBalance).toHaveBeenCalledWith("P123", -200n, 100);
+  });
+});
+
 // ── unknown topics still fall through ────────────────────────────────────────
 
 describe("domain-processor: unknown topic", () => {
