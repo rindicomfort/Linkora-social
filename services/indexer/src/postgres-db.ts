@@ -1,5 +1,15 @@
 import { Pool } from "pg";
-import { Database, Profile, Follow, Post, Like, Tip, Pool as PoolModel } from "./db";
+import {
+  Database,
+  Profile,
+  Follow,
+  Post,
+  Like,
+  Tip,
+  Pool as PoolModel,
+  GovernanceProposal,
+  GovernanceVote,
+} from "./db";
 
 export class PostgresDatabase implements Database {
   private pool: Pool;
@@ -233,6 +243,74 @@ export class PostgresDatabase implements Database {
       OFFSET $2 LIMIT $3
       `,
       [author ?? null, offset, limit]
+    );
+
+    const posts: Post[] = res.rows.map((row) => ({
+      id: BigInt(row.id),
+      author: row.author,
+      content: row.content,
+      deleted: row.deleted,
+      tip_total: BigInt(row.tip_total),
+      like_count: BigInt(row.like_count),
+      created_ledger: Number(row.created_ledger),
+      deleted_ledger: row.deleted_ledger === null ? null : Number(row.deleted_ledger),
+    }));
+
+    return { posts, total };
+  }
+
+  async searchPosts(filters: {
+    q: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ posts: Post[]; total: number }> {
+    const { q, limit, offset } = filters;
+
+    const sanitised = q
+      .trim()
+      .replace(/[^\w\s]/gu, " ")
+      .trim();
+
+    if (!sanitised) {
+      return { posts: [], total: 0 };
+    }
+
+    const tsQuery = sanitised
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((t) => `${t}:*`)
+      .join(" & ");
+
+    const totalRes = await this.pool.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM posts
+      WHERE deleted_at IS NULL
+        AND content_tsv @@ to_tsquery('english', $1)
+      `,
+      [tsQuery]
+    );
+    const total = totalRes.rows[0]?.total ?? 0;
+
+    const res = await this.pool.query(
+      `
+      SELECT
+        id,
+        author,
+        content,
+        deleted_at IS NOT NULL AS deleted,
+        tip_total,
+        like_count,
+        extract(epoch from created_at)::bigint AS created_ledger,
+        CASE WHEN deleted_at IS NULL THEN NULL ELSE extract(epoch from deleted_at)::bigint END AS deleted_ledger,
+        ts_rank(content_tsv, to_tsquery('english', $1)) AS rank
+      FROM posts
+      WHERE deleted_at IS NULL
+        AND content_tsv @@ to_tsquery('english', $1)
+      ORDER BY rank DESC, created_at DESC
+      OFFSET $2 LIMIT $3
+      `,
+      [tsQuery, offset, limit]
     );
 
     const posts: Post[] = res.rows.map((row) => ({
@@ -677,5 +755,81 @@ export class PostgresDatabase implements Database {
       created_at: row.created_at,
       updated_at: row.updated_at,
     }));
+  }
+
+  // ───────────────────────────────── Blocks ───────────────────────────────────
+
+  async insertBlock(block: { blocker: string; blocked: string }): Promise<void> {
+    await this.pool.query(
+      `
+      INSERT INTO blocks (blocker, blocked)
+      VALUES ($1, $2)
+      ON CONFLICT (blocker, blocked) DO NOTHING
+      `,
+      [block.blocker, block.blocked]
+    );
+  }
+
+  async deleteBlock(blocker: string, blocked: string): Promise<void> {
+    await this.pool.query(
+      `
+      DELETE FROM blocks
+      WHERE blocker = $1 AND blocked = $2
+      `,
+      [blocker, blocked]
+    );
+  }
+
+  async getBlockedUsers(
+    address: string,
+    limit: number,
+    offset: number
+  ): Promise<{ blocked: string[]; total: number }> {
+    const totalRes = await this.pool.query(
+      `SELECT COUNT(*)::int AS total FROM blocks WHERE blocker = $1`,
+      [address]
+    );
+    const total = totalRes.rows[0]?.total ?? 0;
+
+    const res = await this.pool.query(
+      `
+      SELECT blocked
+      FROM blocks
+      WHERE blocker = $1
+      ORDER BY blocked ASC
+      OFFSET $2 LIMIT $3
+      `,
+      [address, offset, limit]
+    );
+
+    return { blocked: res.rows.map((r) => r.blocked as string), total };
+  }
+
+  // ───────────────────────────────── DM Keys ──────────────────────────────────
+
+  async upsertDmKey(dmKey: { address: string; x25519_pubkey: string }): Promise<void> {
+    await this.pool.query(
+      `
+      INSERT INTO dm_keys (address, x25519_pubkey, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (address)
+      DO UPDATE SET
+        x25519_pubkey = EXCLUDED.x25519_pubkey,
+        updated_at = EXCLUDED.updated_at
+      `,
+      [dmKey.address, dmKey.x25519_pubkey]
+    );
+  }
+
+  async getDmKey(address: string): Promise<string | null> {
+    const res = await this.pool.query(
+      `
+      SELECT x25519_pubkey
+      FROM dm_keys
+      WHERE address = $1
+      `,
+      [address]
+    );
+    return res.rows[0]?.x25519_pubkey ?? null;
   }
 }

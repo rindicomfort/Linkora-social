@@ -149,6 +149,11 @@ export interface Database {
     limit: number;
     offset: number;
   }): Promise<{ posts: Post[]; total: number }>;
+  searchPosts(filters: {
+    q: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ posts: Post[]; total: number }>;
   listPostsCursor(filters: {
     author?: string;
     limit: number;
@@ -164,4 +169,17 @@ export interface Database {
     limit: number,
     offset: number
   ): Promise<{ following: string[]; total: number }>;
+
+  // Blocks
+  insertBlock(block: { blocker: string; blocked: string }): Promise<void>;
+  deleteBlock(blocker: string, blocked: string): Promise<void>;
+  getBlockedUsers(
+    address: string,
+    limit: number,
+    offset: number
+  ): Promise<{ blocked: string[]; total: number }>;
+
+  // DM Keys
+  upsertDmKey(dmKey: { address: string; x25519_pubkey: string }): Promise<void>;
+  getDmKey(address: string): Promise<string | null>;
 }

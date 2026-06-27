@@ -27,9 +27,12 @@ interface RequestContext {
   ipAddress?: string;
 }
 
-declare module "express-serve-static-core" {
-  interface Request {
-    context?: RequestContext;
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      context?: RequestContext;
+    }
   }
 }
 

@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import { Pool as PgPool } from "pg";
 import { Database } from "../db";
 import { logger } from "../logger";
-import { rateLimit as apiLimiter, rateLimitRead, rateLimitWrite } from "../middleware/rateLimit";
+import { rateLimit as apiLimiter } from "../middleware/rateLimit";
 import { requireStellarAuth } from "../middleware/stellarAuth";
 import { createProfilesRouter } from "./routes/profiles";
 import { createPostsRouter } from "./routes/posts";
@@ -11,7 +11,9 @@ import { createPoolsRouter } from "./routes/pools";
 import { createStateRootRouter } from "./routes/stateRoot";
 import { createNotificationsRouter } from "./routes/notifications";
 import { createGovernanceRouter } from "./routes/governance";
+import { createUsersRouter } from "./routes/users";
 import { isFenced } from "../gossip";
+import { getBackfillState } from "../stream";
 import {
   defaultNotificationService,
   NotificationService,
@@ -64,6 +66,7 @@ export function createApp(db: Database, pg?: PgPool): express.Application {
   app.use("/api/follows", createFollowsRouter(db));
   app.use("/api/pools", createPoolsRouter(db));
   app.use("/api/governance", createGovernanceRouter(db));
+  app.use("/api/users", createUsersRouter(db));
 
   const notificationService = pg
     ? new NotificationService({ deviceTokenStore: new PostgresDeviceTokenStore(pg) })
@@ -136,12 +139,10 @@ if (require.main === module) {
   const PORT = parseInt(process.env.PORT ?? "3001", 10);
   const databaseUrl = process.env.DATABASE_URL;
   const pg = databaseUrl ? new PgPool({ connectionString: databaseUrl }) : undefined;
-  const apiApp = pg ? createApp(new PostgresDatabase(pg), pg) : app;
+  const apiApp = pg ? createApp(new PostgresDatabase(pg), pg) : createApp(_stub);
 
   apiApp.listen(PORT, () => {
     console.log(`Indexer API listening on port ${PORT}`);
-    console.log(
-      `Rate limit: ${RATE_LIMIT_MAX} requests per ${RATE_LIMIT_WINDOW_MS / 1000}s per IP`
-    );
+    console.log(`Rate limit enabled: read limit is 60 RPM, write limit is 10 RPM`);
   });
 }

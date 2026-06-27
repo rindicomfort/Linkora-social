@@ -22,7 +22,7 @@
 
 import http from "http";
 import { Pool } from "pg";
-import { streamEvents, backfillStartupGap, getBackfillState, RawEvent, BatchProcessor } from "./stream";
+import { streamEvents, backfillStartupGap, RawEvent, BatchProcessor } from "./stream";
 import { IngestPipeline, IngestEvent } from "./pipeline";
 import { bus } from "./bus";
 import { attachWebSocketServer } from "./ws";
@@ -122,6 +122,27 @@ async function ensureSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_sent_notifications_recipient
       ON sent_notifications (recipient, dispatched_at DESC)
   `);
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS blocks (
+      blocker TEXT NOT NULL,
+      blocked TEXT NOT NULL,
+      PRIMARY KEY (blocker, blocked)
+    )
+  `);
+  await pgPool.query(`
+    CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks (blocker)
+  `);
+  await pgPool.query(`
+    CREATE INDEX IF NOT EXISTS idx_blocks_blocked ON blocks (blocked)
+  `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS dm_keys (
+      address       TEXT PRIMARY KEY,
+      x25519_pubkey TEXT NOT NULL,
+      updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
 }
 
 // ── Event normalisation ─────────────────────────────────────────────────────
@@ -184,7 +205,11 @@ async function main(): Promise<void> {
   const pipeline = new IngestPipeline(pgPool, {
     streamId: CONTRACT_ID,
     bus,
-    domainProcessor: createDomainProcessor(pgPool, notificationService, new PostgresDatabase(pgPool)),
+    domainProcessor: createDomainProcessor(
+      pgPool,
+      notificationService,
+      new PostgresDatabase(pgPool)
+    ),
   });
 
   const processBatch: BatchProcessor = async (events) => {
