@@ -1,11 +1,5 @@
 import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { useRouter } from "expo-router";
 import { PoolCard } from "../../components/PoolCard";
 import { PoolCardSkeleton } from "../../components/skeletons/PoolCardSkeleton";
@@ -67,8 +61,8 @@ export default function PoolsScreen() {
         </View>
         <EmptyState
           icon="◎"
-          title="No pools available"
-          subtitle="Check back soon for community funding opportunities"
+          title="No community pools yet"
+          subtitle="Pools are community treasuries managed by admins to coordinate deposits for creators and collectives."
         />
       </View>
     );
