@@ -711,6 +711,26 @@ fn test_like_post_no_event_on_duplicate() {
     );
 }
 
+// ── Issue #712: get_like_count returns 0 for post with no likes ───────────────
+
+#[test]
+fn test_get_like_count_returns_zero_for_post_with_no_likes() {
+    // Create a post and immediately call get_like_count.
+    // Verify it returns 0 without error.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = setup_contract(&env);
+
+    let author = Address::generate(&env);
+    let post_id = client.create_post(&author, &String::from_str(&env, "No likes yet"));
+
+    assert_eq!(
+        client.get_like_count(&post_id),
+        0,
+        "get_like_count must return 0 for a newly created post with no likes"
+    );
+}
+
 #[test]
 fn test_pool_authorization() {
     let env = Env::default();
