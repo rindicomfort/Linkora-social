@@ -15,7 +15,7 @@ proptest! {
     ) {
         // Verify that following someone adds them to the adjacency set
         prop_assume!(follower_id != followee_id);
-        
+
         // Following should be idempotent:
         // Following twice should have the same effect as following once
         println!("Property: Following {} → {} creates correct adjacency", follower_id, followee_id);
@@ -27,7 +27,7 @@ proptest! {
         followee_id in "[a-zA-Z0-9]{8}",
     ) {
         prop_assume!(follower_id != followee_id);
-        
+
         // Unfollow after follow should restore to initial state
         println!("Property: Unfollow {} ← {} removes adjacency", follower_id, followee_id);
     }
@@ -38,7 +38,7 @@ proptest! {
         user_b in "[a-zA-Z0-9]{8}",
     ) {
         prop_assume!(user_a != user_b);
-        
+
         // Block should prevent:
         // 1. Tipping
         // 2. Following

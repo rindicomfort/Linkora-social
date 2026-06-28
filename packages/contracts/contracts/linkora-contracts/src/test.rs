@@ -831,6 +831,26 @@ fn test_post_count_not_decremented_on_delete() {
 }
 
 #[test]
+fn test_get_post_returns_none_for_deleted_post() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = setup_contract(&env);
+
+    let author = Address::generate(&env);
+    let post_id = client.create_post(&author, &String::from_str(&env, "Test Post"));
+
+    assert_eq!(client.get_post_count(), 1);
+    assert!(client.get_post(&post_id).is_some());
+
+    // Delete the post
+    client.delete_post(&author, &post_id);
+
+    // Verify it returns None and get_post_count is unchanged
+    assert!(client.get_post(&post_id).is_none());
+    assert_eq!(client.get_post_count(), 1);
+}
+
+#[test]
 fn test_follow_and_unfollow() {
     let env = Env::default();
     env.mock_all_auths();

@@ -1356,8 +1356,8 @@ impl LinkoraContract {
         Self::bump_temp(&env, &cooldown_key);
 
         let fee_bps = Self::get_fee_bps(env.clone());
-        let fee_amount = (amount / 10_000) * fee_bps as i128
-            + (amount % 10_000) * fee_bps as i128 / 10_000;
+        let fee_amount =
+            (amount / 10_000) * fee_bps as i128 + (amount % 10_000) * fee_bps as i128 / 10_000;
         let author_amount = amount - fee_amount;
         post.tip_total += author_amount;
         env.storage().persistent().set(&key, &post);
@@ -1924,10 +1924,7 @@ impl LinkoraContract {
             GovParameter::GovQuorum => {
                 let val = proposal.new_value as u32;
                 assert!(val > 0 && val <= 100, "quorum must be 1-100");
-                assert!(
-                    val >= config.quorum_floor,
-                    "quorum must be >= quorum_floor"
-                );
+                assert!(val >= config.quorum_floor, "quorum must be >= quorum_floor");
                 let mut cfg = config.clone();
                 cfg.quorum = val;
                 env.storage().persistent().set(&StorageKey::GovConfig, &cfg);
