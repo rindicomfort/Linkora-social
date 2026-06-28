@@ -26,6 +26,17 @@ Emitted when a user creates or updates their profile.
   - `user`: `Address`
   - `username`: `String`
 
+### ProfileDeleted
+
+Emitted when a user deletes their profile.
+
+- **Topic 0**: `Linkora`
+- **Topic 1**: `profile_del`
+- **Topic 2**: `v1`
+- **Data Payload**: `ProfileDeletedEvent`
+  - `user`: `Address`
+  - `username`: `String`
+
 ### Follow
 
 Emitted when a user follows another user.

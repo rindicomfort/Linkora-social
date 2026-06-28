@@ -1,10 +1,28 @@
 import React from "react";
 import renderer from "react-test-renderer";
-import { fireEvent, render } from "@testing-library/react-native";
+import { act, fireEvent, render } from "@testing-library/react-native";
 import { PostCard, Post } from "./PostCard";
 import { useRouter } from "expo-router";
+import * as Haptics from "expo-haptics";
 
 jest.mock("expo-router", () => ({ useRouter: jest.fn(() => ({ push: jest.fn() })) }));
+jest.mock("../context/WalletContext", () => ({
+  useWalletContext: () => ({
+    wallet: { address: "GADDRESSMOCKEDFOROPTIMISTICTEST" },
+    network: "TESTNET",
+    state: "connected",
+    error: null,
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    refresh: jest.fn(),
+    setNetwork: jest.fn(),
+  }),
+  WalletProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+jest.mock("../context/ToastContext", () => ({
+  useToast: () => ({ showSuccess: jest.fn(), showError: jest.fn() }),
+  ToastProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
 describe("PostCard", () => {
   const defaultPost: Post = {
@@ -19,17 +37,18 @@ describe("PostCard", () => {
 
   describe("Rendering", () => {
     it("renders all post fields correctly", () => {
-      const { getByText } = render(<PostCard post={defaultPost} />);
+      const { getByText, getByTestId } = render(<PostCard post={defaultPost} />);
       expect(getByText(defaultPost.username)).toBeTruthy();
       expect(getByText(defaultPost.content)).toBeTruthy();
-      expect(getByText("♥ 42")).toBeTruthy();
-      expect(getByText("◎ 100")).toBeTruthy();
+      // The like-count badge shows the like_count next to the heart icon.
+      expect(getByTestId("like-count-text").props.children).toBe(42);
+      expect(getByText(/100/)).toBeTruthy();
     });
 
     it("renders with zero likes correctly", () => {
       const post = { ...defaultPost, like_count: 0 };
-      const { getByText } = render(<PostCard post={post} />);
-      expect(getByText("♥ 0")).toBeTruthy();
+      const { getByTestId } = render(<PostCard post={post} />);
+      expect(getByTestId("like-count-text").props.children).toBe(0);
     });
 
     it("renders with long content correctly", () => {
@@ -56,10 +75,12 @@ describe("PostCard", () => {
 
   describe("Accessibility", () => {
     it("has accessible button role and label", () => {
-      const { getByRole } = render(<PostCard post={defaultPost} />);
-      const button = getByRole("button");
-      expect(button).toBeTruthy();
-      expect(button.props.accessibilityLabel).toBe(`Post by ${defaultPost.username}`);
+      const { getAllByRole } = render(<PostCard post={defaultPost} />);
+      const buttons = getAllByRole("button");
+      const card = buttons.find(
+        (b) => b.props.accessibilityLabel === `Post by ${defaultPost.username}`
+      );
+      expect(card).toBeTruthy();
     });
 
     it("avatar has minimum 44x44 touch target", () => {
@@ -71,9 +92,11 @@ describe("PostCard", () => {
   describe("Interaction", () => {
     it("calls onPress when tapped", () => {
       const onPress = jest.fn();
-      const { getByRole } = render(<PostCard post={defaultPost} onPress={onPress} />);
-      const button = getByRole("button");
-      fireEvent.press(button);
+      const { getAllByRole } = render(<PostCard post={defaultPost} onPress={onPress} />);
+      const card = getAllByRole("button").find(
+        (b) => b.props.accessibilityLabel === `Post by ${defaultPost.username}`
+      );
+      fireEvent.press(card!);
       expect(onPress).toHaveBeenCalled();
     });
 
@@ -81,10 +104,37 @@ describe("PostCard", () => {
       const mockPush = jest.fn();
       (useRouter as jest.Mock).mockReturnValue({ push: mockPush });
 
-      const { getByRole } = render(<PostCard post={defaultPost} />);
-      const button = getByRole("button");
-      fireEvent.press(button);
+      const { getAllByRole } = render(<PostCard post={defaultPost} />);
+      const card = getAllByRole("button").find(
+        (b) => b.props.accessibilityLabel === `Post by ${defaultPost.username}`
+      );
+      fireEvent.press(card!);
       expect(mockPush).toHaveBeenCalledWith(`/post/${defaultPost.id}`);
+    });
+
+    it("triggers light haptic feedback when the like button is pressed", () => {
+      const { getByLabelText } = render(<PostCard post={defaultPost} />);
+
+      // defaultPost has like_count: 42 and is unliked, so the
+      // accessibilityLabel includes the current count for screen readers.
+      fireEvent.press(getByLabelText(/^Like post/));
+
+      expect(Haptics.impactAsync).toHaveBeenCalledWith(Haptics.ImpactFeedbackStyle.Light);
+    });
+
+    it("optimistically increments the displayed like count when tapped", () => {
+      // Issue #735: like count must update optimistically on tap.
+      const { getByTestId, getByLabelText } = render(<PostCard post={defaultPost} />);
+
+      // Initial count is 42.
+      expect(getByTestId("like-count-text").props.children).toBe(42);
+
+      fireEvent.press(getByLabelText(/^Like post/));
+
+      // Without awaiting the network call, the count must already be 43
+      // (optimistic update). The useLike hook reverts on error, so we only
+      // assert the optimistic path here.
+      expect(getByTestId("like-count-text").props.children).toBe(43);
     });
   });
 });
