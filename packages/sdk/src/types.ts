@@ -48,6 +48,34 @@ export interface SimulationResult {
 }
 
 /**
+ * Minimal interface for a Stellar transaction object that can be
+ * converted to an XDR envelope string.
+ *
+ * Implemented by StellarBase Transaction and FeeBumpTransaction.
+ * Accepting this union (string | TransactionLike) lets callers pass
+ * either a pre-encoded XDR string or a live transaction object without
+ * losing type safety.
+ *
+ * @see https://stellar.github.io/js-stellar-base/Transaction.html
+ */
+export inace TransactionLike {
+  /**
+   * Serialize the transaction to a base64-encoded XDR envelope string.
+   * @param format Must be "base64" for Stellar network submission.
+   */
+  toEnvelope(): { toXDR(format: "base64"): string };
+
+  /** The network passphrase this transaction is bound to (optional). */
+  networkPassphrase?: string;
+
+  /**
+   * Signatures attached to the transaction (optional).
+   * Each entry is a decorated signature from a signer.
+   */
+  signatures?: Array<{ hint(): Buffer; signature(): Buffer }>;
+}
+
+/**
  * Interface for transaction signers (e.g., Freighter, Ledger, etc.)
  */
 export interface Signer {
