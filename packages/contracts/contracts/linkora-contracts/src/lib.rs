@@ -345,6 +345,14 @@ pub struct PostDeleted {
 
 #[contractevent]
 #[derive(Clone)]
+pub struct ProfileDeletedEvent {
+    #[topic]
+    pub user: Address,
+    pub username: String,
+}
+
+#[contractevent]
+#[derive(Clone)]
 pub struct ProposalCreatedEvent {
     #[topic]
     pub pool_id: Symbol,
@@ -727,6 +735,12 @@ impl LinkoraContract {
             .persistent()
             .get(&key)
             .unwrap_or_else(|| panic!("profile does not exist"));
+
+        ProfileDeletedEvent {
+            user: user.clone(),
+            username: profile.username.clone(),
+        }
+        .publish(&env);
 
         env.storage()
             .persistent()
