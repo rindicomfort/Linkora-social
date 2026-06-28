@@ -15,7 +15,8 @@ import {
   getConnectionState,
   deleteConnectionState,
 } from "../utils/secureStorage";
-import { useNetworkContext, type NetworkPreset } from "./NetworkContext";
+import { deregisterTokenFromIndexer } from "../notifications/registerForPushNotifications";
+import { useNetworkContext, type NetworkPreset, type StellarNetworkId } from "./NetworkContext";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +26,7 @@ export type WalletState = "loading" | "disconnected" | "connecting" | "connected
 
 export type WalletProviderKind = "freighter" | "walletconnect";
 
-export type WalletNetwork = "TESTNET" | "MAINNET";
+export type WalletNetwork = StellarNetworkId;
 
 export interface WalletInfo {
   address: string | null;
@@ -40,13 +41,45 @@ interface StoredConnectionState {
 }
 
 interface WalletConnectLike {
-  connect: (
-    network: NetworkPreset
-  ) => Promise<{ publicKey?: string; address?: string }>;
+  connect: (network: NetworkPreset) => Promise<{ publicKey?: string; address?: string }>;
   disconnect: () => Promise<void>;
   getPublicKey?: () => Promise<string>;
   isConnected?: () => Promise<boolean>;
+  signTransaction?: (payload: { txXdr: string }) => Promise<WalletSignResult>;
+  signAndSubmitTransaction?: (payload: {
+    txXdr: string;
+    rpcUrl?: string;
+  }) => Promise<WalletSubmitResult>;
 }
+
+interface WalletSignResult {
+  signedTxXdr?: string;
+  signedXdr?: string;
+  signed?: string;
+}
+
+interface WalletSubmitResult {
+  hash?: string;
+  txHash?: string;
+}
+
+interface StellarServerWithSubmit {
+  submitTransaction: (signedXdr: string) => Promise<WalletSubmitResult>;
+}
+
+type WalletConnectRequestArgs = {
+  topic: string;
+  chainId: string;
+  chain: string;
+  request: {
+    method: string;
+    params: { txXdr: string };
+  };
+};
+
+type LinkoraGlobal = typeof globalThis & {
+  __LINKORA_WALLET_KIT__?: WalletConnectLike;
+};
 
 async function createWalletConnectAdapter(): Promise<WalletConnectLike> {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
@@ -57,8 +90,9 @@ async function createWalletConnectAdapter(): Promise<WalletConnectLike> {
   let client: Awaited<ReturnType<typeof SignClient.init>> | null = null;
   let topic: string | null = null;
   let currentAddress: string | null = null;
+  let connectedNetwork: NetworkPreset | null = null;
 
-  return {
+  const adapter: WalletConnectLike = {
     async connect(network: NetworkPreset) {
       if (!projectId) {
         throw new Error("WalletConnect project id not configured");
@@ -86,84 +120,90 @@ async function createWalletConnectAdapter(): Promise<WalletConnectLike> {
         },
       });
 
-      if (uri) {
-        await Linking.openURL(uri);
-      }
+      if (uri) await Linking.openURL(uri);
 
       const session = await approval();
       topic = session.topic;
       const account = session.namespaces.stellar?.accounts?.[0];
       currentAddress = account?.split(":").pop() ?? null;
+      connectedNetwork = network;
 
-      if (!currentAddress) {
-        throw new Error("No Stellar account returned from WalletConnect");
-      }
+      if (!currentAddress) throw new Error("No Stellar account returned from WalletConnect");
 
       return { publicKey: currentAddress };
     },
+
     async disconnect() {
       if (client && topic) {
-        await client.disconnect({
-          topic,
-          reason: { code: 6000, message: "User disconnected" },
-        });
+        await client.disconnect({ topic, reason: { code: 6000, message: "User disconnected" } });
       }
       topic = null;
       currentAddress = null;
+      connectedNetwork = null;
     },
+
     async getPublicKey() {
-      if (!currentAddress) {
-        throw new Error("WalletConnect is not connected");
-      }
+      if (!currentAddress) throw new Error("WalletConnect is not connected");
       return currentAddress;
     },
+
     async isConnected() {
       return Boolean(currentAddress);
     },
+
+    async signTransaction({ txXdr }: { txXdr: string }) {
+      if (!client || !topic || !connectedNetwork) throw new Error("Wallet not connected");
+
+      const request = {
+        topic,
+        chainId: connectedNetwork.chain,
+        chain: connectedNetwork.chain,
+        request: {
+          method: "stellar_signXDR",
+          params: { txXdr },
+        },
+      } satisfies WalletConnectRequestArgs;
+
+      const res = await client.request(request as Parameters<typeof client.request>[0]);
+      return res as WalletSignResult;
+    },
+
+    async signAndSubmitTransaction({ txXdr, rpcUrl }: { txXdr: string; rpcUrl?: string }) {
+      const signed = await adapter.signTransaction?.({ txXdr });
+      const signedXdr = signed?.signedTxXdr || signed?.signedXdr || signed?.signed;
+      if (!signedXdr) throw new Error("Wallet did not return signed transaction XDR");
+
+      const { rpc } = await import("@stellar/stellar-sdk");
+      const server = new rpc.Server(rpcUrl ?? connectedNetwork?.rpcUrl ?? "");
+      const submitRes = await (server as unknown as StellarServerWithSubmit).submitTransaction(
+        signedXdr
+      );
+      return submitRes;
+    },
   };
+
+  return adapter;
 }
 
 declare global {
-  // Test/runtime escape hatch for environments where the optional wallet kit
-  // package is intentionally not installed.
-  // eslint-disable-next-line no-var, @typescript-eslint/no-explicit-any
-  var __LINKORA_WALLET_KIT__: any | undefined;
+  // eslint-disable-next-line no-var
+  var __LINKORA_WALLET_KIT__: WalletConnectLike | undefined;
 }
 
 export interface WalletContextType {
-  /** Current connection state machine value */
   state: WalletState;
-  /** Wallet address and network info */
   wallet: WalletInfo;
-  /** Active network preference */
   network: WalletNetwork;
-  /** Last error message, if any */
   error: string | null;
-  /** Initiate wallet connection */
   connect: (provider?: WalletProviderKind) => Promise<void>;
-  /** Disconnect and clear persisted state */
   disconnect: () => Promise<void>;
-  /** Re-check connection state (e.g. after app foreground) */
   refresh: () => Promise<void>;
-  /** Update the active network preference */
   setNetwork: (network: WalletNetwork) => void;
 }
 
-// ---------------------------------------------------------------------------
-// Context
-// ---------------------------------------------------------------------------
-
 const WalletContext = createContext<WalletContextType | null>(null);
 
-// ---------------------------------------------------------------------------
-// Provider
-// ---------------------------------------------------------------------------
-
-interface WalletProviderProps {
-  children: ReactNode;
-}
-
-export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
+export function WalletProvider({ children }: { children: ReactNode }): JSX.Element {
   const { network: selectedNetwork } = useNetworkContext();
   const [state, setState] = useState<WalletState>("loading");
   const [network, setNetwork] = useState<WalletNetwork>("TESTNET");
@@ -174,12 +214,10 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
   });
   const [error, setError] = useState<string | null>(null);
 
-  // Lazy-loaded WalletConnect-compatible wallet kit instance
   const [walletKit, setWalletKit] = useState<WalletConnectLike | null>(
     () => globalThis.__LINKORA_WALLET_KIT__ ?? null
   );
 
-  // Initialize the WalletConnect adapter on mount.
   useEffect(() => {
     let cancelled = false;
 
@@ -191,7 +229,11 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
         }
 
         if (!cancelled) {
-          setWalletKit(await createWalletConnectAdapter());
+          const adapter = await createWalletConnectAdapter();
+          // Expose globally for other modules that expect a wallet kit
+          // (tests or mini-app bridges may rely on this global).
+          (globalThis as LinkoraGlobal).__LINKORA_WALLET_KIT__ = adapter;
+          setWalletKit(adapter);
         }
       } catch {
         if (!cancelled) {
@@ -220,9 +262,7 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
     const available =
       typeof freighter.isConnected === "function" ? await freighter.isConnected() : true;
 
-    if (!available) {
-      throw new Error("Freighter is not available");
-    }
+    if (!available) throw new Error("Freighter is not available");
 
     if (typeof freighter.requestAccess === "function") {
       const result = await freighter.requestAccess();
@@ -258,7 +298,6 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
     throw new Error("No address returned from Freighter");
   }, [importFreighterApi]);
 
-  // Check persisted connection state once wallet kit is ready
   const checkConnectionState = useCallback(async () => {
     if (!walletKit) return;
 
@@ -270,15 +309,19 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
       const storedConn = await getConnectionState();
 
       if (storedAddress && storedConn) {
-        const isConnected: boolean = await walletKit.isConnected();
+        const isConnected: boolean = walletKit.isConnected
+          ? await walletKit.isConnected()
+          : Boolean(storedAddress);
 
         if (isConnected) {
-          const currentAddress: string = await walletKit.getPublicKey();
+          const currentAddress: string = walletKit.getPublicKey
+            ? await walletKit.getPublicKey()
+            : storedAddress;
 
           if (currentAddress === storedAddress) {
             setWallet({
               address: currentAddress,
-              network: selectedNetwork.label,
+              network: selectedNetwork.id,
               provider: "walletconnect",
             });
             setState("connected");
@@ -286,7 +329,6 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
           }
         }
 
-        // Stale — clear storage
         await Promise.all([deleteWalletAddress(), deleteConnectionState()]);
       }
 
@@ -296,15 +338,12 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
       setState("error");
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, [walletKit, selectedNetwork.label]);
+  }, [walletKit, selectedNetwork.id]);
 
   useEffect(() => {
-    if (walletKit) {
-      checkConnectionState();
-    }
+    if (walletKit) checkConnectionState();
   }, [walletKit, checkConnectionState]);
 
-  // Connect
   const connect = useCallback(
     async (provider: WalletProviderKind = "walletconnect") => {
       try {
@@ -316,13 +355,10 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
         if (provider === "freighter") {
           address = await requestFreighterAddress();
         } else {
-          if (!walletKit) {
-            throw new Error("WalletConnect is not available");
-          }
+          if (!walletKit) throw new Error("WalletConnect is not available");
 
-          const result: { publicKey?: string; address?: string } = await walletKit.connect(
-            selectedNetwork
-          );
+          const result: { publicKey?: string; address?: string } =
+            await walletKit.connect(selectedNetwork);
           address = result.publicKey ?? result.address ?? null;
 
           if (typeof walletKit.getPublicKey === "function") {
@@ -330,19 +366,16 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
           }
         }
 
-        if (!address) {
-          throw new Error("No address returned from wallet");
-        }
+        if (!address) throw new Error("No address returned from wallet");
 
         const connState: StoredConnectionState = {
           connected: true,
           address,
           timestamp: Date.now(),
         };
-
         await Promise.all([setWalletAddress(address), setConnectionState(connState)]);
 
-        setWallet({ address, network: selectedNetwork.label, provider });
+        setWallet({ address, network: selectedNetwork.id, provider });
         setState("connected");
       } catch (err) {
         setState("error");
@@ -353,21 +386,22 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
     [requestFreighterAddress, selectedNetwork, walletKit]
   );
 
-  // Disconnect
   const disconnect = useCallback(async () => {
+    const currentAddress = wallet.address;
     try {
       setError(null);
-      if (walletKit) {
-        await walletKit.disconnect();
-      }
+      if (walletKit) await walletKit.disconnect();
     } catch {
-      // Ignore disconnect errors — always clear local state
+      // ignore
     } finally {
+      if (currentAddress) {
+        void deregisterTokenFromIndexer(currentAddress);
+      }
       await Promise.all([deleteWalletAddress(), deleteConnectionState()]);
       setWallet({ address: null, network: null, provider: null });
       setState("disconnected");
     }
-  }, [walletKit]);
+  }, [walletKit, wallet.address]);
 
   const refresh = useCallback(async () => {
     await checkConnectionState();
@@ -375,12 +409,9 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
 
   useEffect(() => {
     if (wallet.address) {
-      setWallet((current) => ({
-        ...current,
-        network: selectedNetwork.label,
-      }));
+      setWallet((current) => ({ ...current, network: selectedNetwork.id }));
     }
-  }, [selectedNetwork.label, wallet.address]);
+  }, [selectedNetwork.id, wallet.address]);
 
   const value: WalletContextType = {
     state,
@@ -396,19 +427,9 @@ export function WalletProvider({ children }: WalletProviderProps): JSX.Element {
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
-/**
- * Returns wallet state and actions.
- * Must be used inside <WalletProvider>.
- */
 export function useWalletContext(): WalletContextType {
   const ctx = useContext(WalletContext);
-  if (!ctx) {
-    throw new Error("useWalletContext must be used within a WalletProvider");
-  }
+  if (!ctx) throw new Error("useWalletContext must be used within a WalletProvider");
   return ctx;
 }
 

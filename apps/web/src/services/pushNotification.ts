@@ -1,0 +1,92 @@
+/**
+ * Utility function to convert a standard base64 VAPID string 
+ * into a Uint8Array needed by the browser's PushManager subscription settings.
+ */
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// Public VAPID Key configured from your environment variables
+const VAPID_PUBLIC_KEY = process.env.REACT_APP_VAPID_PUBLIC_KEY || 'YOUR_PUBLIC_VAPID_KEY_HERE';
+
+/**
+ * Registers the Service Worker (if not already done) and requests/retrieves
+ * a unique PushSubscription object from the browser's PushManager.
+ */
+export async function registerServiceWorkerAndSubscribe(): Promise<PushSubscription | null> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.warn('Push messaging is not supported in this browser environments.');
+    return null;
+  }
+
+  try {
+    // 1. Wait for the service worker context to be ready
+    const registration = await navigator.serviceWorker.ready;
+
+    // 2. Look up if an existing subscription identifier is active
+    let subscription = await registration.pushManager.getSubscription();
+
+    // 3. If no active registration credentials exist, initialize a new registration prompt
+    if (!subscription) {
+      const convertedKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: convertedKey
+      });
+    }
+
+    return subscription;
+  } catch (error) {
+    console.error('Failed to subscribe user via browser Push API:', error);
+    throw error;
+  }
+}
+
+/**
+ * Revokes the active push subscription token inside the client application browser instance.
+ */
+export async function unsubscribeFromPush(): Promise<boolean> {
+  if (!('serviceWorker' in navigator)) return false;
+  
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  
+  if (subscription) {
+    return await subscription.unsubscribe();
+  }
+  return false;
+}
+
+/**
+ * Transmits the structural toggles and the generated push encryption tokens 
+ * to your application database.
+ */
+export async function savePreferencesToBackend(preferences: any, subscription: PushSubscription | null): Promise<any> {
+  const payload = {
+    preferences,
+    subscription: subscription ? subscription.toJSON() : null
+  };
+
+  // Adjust endpoint string to mirror Linkora-Social's API path configuration rules
+  const response = await fetch('/api/user/notification-preferences', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to synchronize preferences with database records.');
+  }
+
+  return await response.json();
+}

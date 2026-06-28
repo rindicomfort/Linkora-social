@@ -2,7 +2,12 @@ import { Tabs, useRouter } from "expo-router";
 import { useEffect } from "react";
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { setupNotificationListeners } from "../notifications/notificationHandler";
+import { registerForPushNotificationsAsync } from "../notifications/registerForPushNotifications";
+
 import { WalletProvider } from "../context/WalletContext";
+import { ToastProvider } from "../context/ToastContext";
+import { NetworkProvider } from "../context/NetworkContext";
 import { useNetwork } from "../hooks/useNetwork";
 import { useWallet } from "../hooks/useWallet";
 import { parseDeepLink } from "../utils/deepLinks";
@@ -80,8 +85,10 @@ function HeaderActions() {
  * Stack screens (detail views) are declared as modal/stack routes
  * alongside the tabs via the Tabs.Screen `href` opt-out pattern.
  */
-export default function RootLayout() {
+function AppNavigator() {
   const router = useRouter();
+  const { address, connected } = useWallet();
+  const { isOffline } = useNetwork();
 
   useEffect(() => {
     let isMounted = true;
@@ -116,8 +123,23 @@ export default function RootLayout() {
     };
   }, [router]);
 
+  useEffect(() => setupNotificationListeners(), []);
+
+  useEffect(() => {
+    if (!connected || !address) {
+      return;
+    }
+
+    void registerForPushNotificationsAsync(address);
+  }, [address, connected]);
+
   return (
-    <WalletProvider>
+    <>
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>No internet connection</Text>
+        </View>
+      )}
       <Tabs
         screenOptions={{
           headerShown: true,
@@ -130,7 +152,7 @@ export default function RootLayout() {
           },
           headerTintColor: "#f8fafc",
           headerRight: () => <HeaderActions />,
-          tabBarActiveTintColor: "#6366f1",
+          tabBarActiveTintColor: theme.colors.brand.accent,
           tabBarInactiveTintColor: "#9ca3af",
           tabBarStyle: {
             backgroundColor: "#0f172a",
@@ -162,8 +184,25 @@ export default function RootLayout() {
           options={{ href: null, headerShown: true, title: "Profile" }}
         />
         <Tabs.Screen name="pool/[id]" options={{ href: null, headerShown: true, title: "Pool" }} />
+        <Tabs.Screen name="pools/[id]" options={{ href: null, headerShown: true, title: "Pool" }} />
+        <Tabs.Screen
+          name="dm/[address]"
+          options={{ href: null, headerShown: true, title: "Direct Message" }}
+        />
       </Tabs>
-    </WalletProvider>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <NetworkProvider>
+      <WalletProvider>
+        <ToastProvider>
+          <AppNavigator />
+        </ToastProvider>
+      </WalletProvider>
+    </NetworkProvider>
   );
 }
 
@@ -212,5 +251,18 @@ const styles = StyleSheet.create({
   },
   networkBadgeTextMainnet: {
     color: "#fecaca",
+  },
+  offlineBanner: {
+    backgroundColor: "#ef4444",
+    paddingTop: 48,
+    paddingBottom: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 9999,
+  },
+  offlineBannerText: {
+    color: "#ffffff",
+    fontWeight: "bold",
+    fontSize: 14,
   },
 });

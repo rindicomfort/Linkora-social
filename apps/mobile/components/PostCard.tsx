@@ -1,9 +1,20 @@
 import React, { useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import * as Haptics from "expo-haptics";
+import {
+  GestureResponderEvent,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useRouter } from "expo-router";
 
+import { useLike } from "../hooks/useLike";
 import { useTheme } from "../theme/useTheme";
 import { PostCardSkeleton as SharedPostCardSkeleton } from "./skeletons/PostCardSkeleton";
+
+export { SharedPostCardSkeleton as PostCardSkeleton };
 
 export interface Post {
   id: number | string;
@@ -13,6 +24,8 @@ export interface Post {
   tip_total: number;
   timestamp: number;
   like_count: number;
+  has_liked?: boolean;
+  sync_status?: "synced" | "pending" | "failed";
 }
 
 interface FeedPostCardProps {
@@ -26,6 +39,7 @@ interface LegacyPostCardProps {
   content: string;
   timestamp: string | number;
   likes?: number;
+  hasLiked?: boolean;
   isLoading?: boolean;
   onPress?: () => void;
 }
@@ -58,6 +72,7 @@ function normalizePost(props: PostCardProps): { post: Post; timeLabel?: string }
       tip_total: 0,
       timestamp: typeof props.timestamp === "number" ? props.timestamp : 0,
       like_count: props.likes ?? 0,
+      has_liked: props.hasLiked ?? false,
     },
     timeLabel: typeof props.timestamp === "string" ? props.timestamp : undefined,
   };
@@ -69,12 +84,29 @@ export function PostCard(props: PostCardProps) {
   const { post, timeLabel } = normalizePost(props);
   const onPress =
     props.onPress ?? (() => router.push(`/post/${post.id}` as Parameters<typeof router.push>[0]));
+  const { liked, likeCount, pending, like } = useLike({
+    postId: post.id,
+    initialHasLiked: post.has_liked ?? false,
+    initialLikeCount: post.like_count,
+  });
 
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   if ("isLoading" in props && props.isLoading) {
     return <SharedPostCardSkeleton />;
   }
+
+  const handleLikePress = (event: GestureResponderEvent) => {
+    // Stop propagation so a like tap doesn't also fire the parent card's
+    // onPress (which navigates to the post detail). Guarded because some
+    // react-native testing-library versions pass `undefined` here for
+    // Pressable targets, and we still want haptic + like() to fire.
+    if (event && typeof event.stopPropagation === "function") {
+      event.stopPropagation();
+    }
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    void like();
+  };
 
   return (
     <TouchableOpacity
@@ -91,14 +123,50 @@ export function PostCard(props: PostCardProps) {
           <Text style={styles.username}>{post.username}</Text>
           <Text style={styles.address}>{shortAddress(post.author)}</Text>
         </View>
-        <Text style={styles.time}>{timeLabel ?? formatTimestamp(post.timestamp)}</Text>
+        <View style={styles.timeContainer}>
+          <Text style={styles.time}>{timeLabel ?? formatTimestamp(post.timestamp)}</Text>
+          {post.sync_status === "pending" && <Text style={styles.pendingBadge}>⏳ Syncing</Text>}
+          {post.sync_status === "failed" && <Text style={styles.failedBadge}>⚠️ Failed</Text>}
+        </View>
       </View>
 
       <Text style={styles.content}>{post.content}</Text>
 
       <View style={styles.footer}>
-        <Text style={styles.stat}>♥ {post.like_count}</Text>
-        <Text style={styles.stat}>◎ {post.tip_total}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            liked
+              ? `Post already liked, ${likeCount} ${likeCount === 1 ? "like" : "likes"}`
+              : `Like post, currently ${likeCount} ${likeCount === 1 ? "like" : "likes"}`
+          }
+          accessibilityState={{ disabled: liked || pending, selected: liked }}
+          disabled={liked || pending}
+          onPress={handleLikePress}
+          style={({ pressed }) => [
+            styles.likeButton,
+            liked && styles.likeButtonLiked,
+            pressed && !liked && !pending && styles.likeButtonPressed,
+          ]}
+        >
+          <View style={styles.likeInner}>
+            <Text style={[styles.likeIcon, liked && styles.likeIconLiked]}>
+              {liked ? "♥" : "♡"}
+            </Text>
+            <View
+              style={[styles.likeBadge, liked && styles.likeBadgeLiked]}
+              testID="like-count-badge"
+            >
+              <Text
+                style={[styles.likeBadgeText, liked && styles.likeBadgeTextLiked]}
+                testID="like-count-text"
+              >
+                {likeCount}
+              </Text>
+            </View>
+          </View>
+        </Pressable>
+        <Text style={styles.stat}>💰 {post.tip_total.toFixed(2)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -154,6 +222,20 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
       color: theme.colors.text.secondary,
       fontSize: 11,
     },
+    timeContainer: {
+      alignItems: "flex-end",
+    },
+    pendingBadge: {
+      fontSize: 9,
+      color: theme.colors.text.secondary,
+      marginTop: 2,
+    },
+    failedBadge: {
+      fontSize: 9,
+      color: theme.colors.semantic?.error ?? "#EF4444",
+      fontWeight: "700",
+      marginTop: 2,
+    },
     content: {
       color: theme.colors.text.primary,
       fontSize: 14,
@@ -161,12 +243,66 @@ function createStyles(theme: ReturnType<typeof useTheme>["theme"]) {
     },
     footer: {
       flexDirection: "row",
+      alignItems: "center",
       marginTop: 12,
       gap: 16,
+    },
+    likeButton: {
+      minHeight: 32,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: theme.colors.surface.border,
+      paddingHorizontal: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    likeButtonLiked: {
+      borderColor: theme.colors.brand.primary,
+      backgroundColor: theme.colors.brand.primaryLight,
+    },
+    likeButtonPressed: {
+      opacity: 0.82,
+    },
+    likeInner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    likeIcon: {
+      fontSize: 16,
+      color: theme.colors.text.secondary,
+      lineHeight: 18,
+    },
+    likeIconLiked: {
+      color: theme.colors.brand.primary,
+    },
+    likeBadge: {
+      minWidth: 22,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 999,
+      backgroundColor: theme.colors.surface.surface2,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    likeBadgeLiked: {
+      backgroundColor: theme.colors.brand.primaryLight,
+    },
+    likeBadgeText: {
+      color: theme.colors.text.secondary,
+      fontSize: 11,
+      fontWeight: "700",
+    },
+    likeBadgeTextLiked: {
+      color: theme.colors.brand.primary,
     },
     stat: {
       color: theme.colors.text.secondary,
       fontSize: 12,
+      fontWeight: "700",
+    },
+    statLiked: {
+      color: theme.colors.brand.primary,
     },
     skeletonBlock: {
       backgroundColor: theme.colors.surface.surface2,

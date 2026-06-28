@@ -1,10 +1,9 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { useRouter } from "expo-router";
 import { PoolCard } from "../../components/PoolCard";
+import { PoolCardSkeleton } from "../../components/skeletons/PoolCardSkeleton";
 import { usePools } from "../../hooks/usePools";
-import { EmptyState } from "../../components/EmptyState";
-
 import { EmptyState } from "../../components/states/EmptyState";
 
 export default function PoolsScreen() {
@@ -22,8 +21,10 @@ export default function PoolsScreen() {
           <Text style={styles.title}>Pools</Text>
           <Text style={styles.subtitle}>Community funding pools</Text>
         </View>
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#6366f1" />
+        <View style={styles.listContainer}>
+          <PoolCardSkeleton />
+          <PoolCardSkeleton />
+          <PoolCardSkeleton />
         </View>
       </View>
     );
@@ -59,8 +60,9 @@ export default function PoolsScreen() {
           <Text style={styles.subtitle}>Community funding pools</Text>
         </View>
         <EmptyState
-          title="No pools available"
-          message="Check back soon for community funding opportunities"
+          icon="◎"
+          title="No community pools yet"
+          subtitle="Pools are community treasuries managed by admins to coordinate deposits for creators and collectives."
         />
       </View>
     );
@@ -123,11 +125,6 @@ const styles = StyleSheet.create({
   listContainer: {
     paddingHorizontal: 16,
     gap: 8,
-  },
-  loaderContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
   },
   errorContainer: {
     flex: 1,

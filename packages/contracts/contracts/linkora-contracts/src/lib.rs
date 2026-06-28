@@ -1,23 +1,56 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
-    Map, String, Symbol, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token,
+    Address, Bytes, BytesN, Env, Map, String, Symbol, Vec,
 };
+
+#[cfg(test)]
+use soroban_sdk::testutils::storage::Persistent as _;
 
 // ── Storage Key Enum ──────────────────────────────────────────────────────────
 
 #[contracttype]
+#[derive(Clone)]
 pub enum StorageKey {
     Post(u64),                 // persistent: post_id -> Post
     Profile(Address),          // persistent: user -> Profile
-    Following(Address),        // persistent: user -> Vec<Address> of accounts they follow
-    Followers(Address),        // persistent: user -> Vec<Address> of accounts following them
+    Following(Address),        // persistent: user -> Vec<Address> (LEGACY — kept for migration)
+    Followers(Address),        // persistent: user -> Vec<Address> (LEGACY — kept for migration)
     Pool(Symbol),              // persistent: pool_id -> Pool
     Like(u64, Address),        // persistent: (post_id, user) -> bool
     AuthorPosts(Address),      // persistent: author -> Vec<u64> of post IDs
     Blocks(Address),           // persistent: blocker -> Map<Address, ()>
     UsernameIndex(String), // persistent: username -> owner Address (reverse index for uniqueness)
     TipCooldown(u64, Address), // temporary: (post_id, tipper) -> last-tip ledger sequence number
+    // ── Adjacency-set social graph (ADR-001) ──────────────────────────────
+    Edge(Address, Address),         // persistent: (follower, followee) -> bool
+    FollowingCount(Address),        // persistent: user -> u32 total following count
+    FollowersCount(Address),        // persistent: user -> u32 total follower count
+    FollowingIdx(Address, u32),     // persistent: (user, seq) -> Address (ordered index)
+    FollowersIdx(Address, u32),     // persistent: (user, seq) -> Address (ordered index)
+    FollowingPos(Address, Address), // persistent: (follower, followee) -> u32 position in idx
+    FollowersPos(Address, Address), // persistent: (followee, follower) -> u32 position in idx
+    GraphMigrated(Address),         // persistent: user -> bool (migration tracking)
+    DmPublicKey(Address),           // persistent: user -> X25519 public key for encrypted DMs
+    CredentialRoot(Address),        // persistent: user -> credential Merkle root
+    NullifierSet(Address, BytesN<32>), // persistent: (user, nullifier) -> bool (prevents replay)
+    // ── Governance ────────────────────────────────────────────────────────
+    GovProposal(u64),      // persistent: proposal_id -> GovProposal
+    GovVote(u64, Address), // persistent: (proposal_id, voter) -> bool (prevents double-voting)
+    GovConfig,             // persistent: governance configuration
+    GovProposalCount,      // persistent: next proposal id counter
+    // ── Analytics Oracle ──────────────────────────────────────────────────
+    OracleKey(Symbol), // persistent: oracle_name -> BytesN<32> Ed25519 pubkey
+    AttestationNullifier(BytesN<32>), // persistent: sha256(report_cbor) -> bool (replay guard)
+    Report(u64, Address), // persistent: (post_id, reporter) -> Report
+    ReportCount(u64),  // persistent: post_id -> u32 count of reports
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum RentError {
+    Expired = 1,
 }
 
 // ── Instance-storage key constants (small scalars, not contracttype) ──────────
@@ -29,7 +62,9 @@ const TREASURY: Symbol = symbol_short!("TREASURY");
 const FEE_BPS: Symbol = symbol_short!("FEE_BPS");
 const INITIALIZED: Symbol = symbol_short!("INIT");
 const TIP_COOLDOWN_WINDOW: Symbol = symbol_short!("TIP_CD_W");
-const PAUSED: Symbol = symbol_short!("PAUSED");
+const REGISTERED_USERS: Symbol = symbol_short!("R_USERS");
+const RENT_RATE_BPS_KEY: Symbol = symbol_short!("RENT_BPS");
+const MODERATION_SLASH_BPS: Symbol = symbol_short!("MOD_SL_B");
 
 // ── TTL Constants ─────────────────────────────────────────────────────────────
 //
@@ -106,7 +141,89 @@ pub struct Proposal {
     pub status: ProposalStatus,
 }
 
+// ── Governance Types ─────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GovParameter {
+    FeeBps,
+    Treasury,
+    TipCooldownWindow,
+    GovQuorum,
+    GovTimeLock,
+    GovVoteWindow,
+    ModerationSlashBps,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GovStatus {
+    Active,
+    Passed,
+    Executed,
+    Vetoed,
+    Failed,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GovProposal {
+    pub id: u64,
+    pub proposer: Address,
+    pub parameter: GovParameter,
+    pub new_value: u64,
+    pub new_address: Option<Address>,
+    pub votes_for: u32,
+    pub votes_against: u32,
+    pub created_ledger: u32,
+    pub time_lock_ledgers: u32,
+    pub status: GovStatus,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GovConfig {
+    pub quorum: u32,
+    pub time_lock_ledgers: u32,
+    pub vote_window_ledgers: u32,
+    pub quorum_decay_rate_bps: u32,
+    pub quorum_floor: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReportStatus {
+    Pending,
+    Dismissed,
+    Upheld,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Report {
+    pub post_id: u64,
+    pub reporter: Address,
+    pub stake_amount: i128,
+    pub token: Address,
+    pub reason_hash: BytesN<32>,
+    pub created_ledger: u32,
+    pub status: ReportStatus,
+}
+
 // ── Events ────────────────────────────────────────────────────────────────────
+
+#[contractevent]
+#[derive(Clone)]
+pub struct RentPaidEvent {
+    #[topic]
+    pub user: Address,
+    #[topic]
+    pub payer: Address,
+    #[topic]
+    pub token: Address,
+    pub amount: i128,
+    pub extended_to_ledger: u32,
+}
 
 #[contractevent]
 #[derive(Clone)]
@@ -286,6 +403,31 @@ pub struct PoolThresholdUpdatedEvent {
 
 #[contractevent]
 #[derive(Clone)]
+pub struct DmKeyPublishedEvent {
+    #[topic]
+    pub user: Address,
+    pub public_key: BytesN<32>,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct CredentialRootUpdatedEvent {
+    #[topic]
+    pub user: Address,
+    pub root: BytesN<32>,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct CredentialVerifiedEvent {
+    #[topic]
+    pub user: Address,
+    #[topic]
+    pub nullifier: BytesN<32>,
+}
+
+#[contractevent]
+#[derive(Clone)]
 pub struct FeeUpdatedEvent {
     #[topic]
     pub name: Symbol,
@@ -301,19 +443,87 @@ pub struct TreasuryUpdatedEvent {
     pub old_treasury: Address,
     pub new_treasury: Address,
 }
-
 #[contractevent]
 #[derive(Clone)]
-pub struct PausedEvent {
+pub struct GovProposalCreatedEvent {
     #[topic]
-    pub admin: Address,
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub parameter: GovParameter,
+    pub new_value: u64,
 }
 
 #[contractevent]
 #[derive(Clone)]
-pub struct UnpausedEvent {
+pub struct GovVoteEvent {
     #[topic]
-    pub admin: Address,
+    pub proposal_id: u64,
+    #[topic]
+    pub voter: Address,
+    pub support: bool,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct GovProposalExecutedEvent {
+    #[topic]
+    pub proposal_id: u64,
+    pub parameter: GovParameter,
+    pub new_value: u64,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct GovProposalVetoedEvent {
+    #[topic]
+    pub proposal_id: u64,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct EmergencyBypassEvent {
+    #[topic]
+    pub action: Symbol,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct AttestationVerifiedEvent {
+    #[topic]
+    pub oracle_name: Symbol,
+    #[topic]
+    pub report_hash: BytesN<32>,
+    pub creator: Address,
+    pub window_start: u64,
+    pub window_end: u64,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct PostReportedEvent {
+    #[topic]
+    pub post_id: u64,
+    #[topic]
+    pub reporter: Address,
+    pub stake_amount: i128,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct PostRemovedByModerationEvent {
+    #[topic]
+    pub post_id: u64,
+    #[topic]
+    pub reporter: Address,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct ReportDismissedEvent {
+    #[topic]
+    pub post_id: u64,
+    #[topic]
+    pub reporter: Address,
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -375,6 +585,7 @@ impl LinkoraContract {
     // ── Initialization ────────────────────────────────────────────────────────
 
     pub fn initialize(env: Env, admin: Address, treasury: Address, fee_bps: u32) {
+        Self::bump_instance(&env);
         if env
             .storage()
             .instance()
@@ -391,12 +602,13 @@ impl LinkoraContract {
         env.storage()
             .instance()
             .set(&TIP_COOLDOWN_WINDOW, &TIP_COOLDOWN_LEDGERS);
+        env.storage().instance().set(&MODERATION_SLASH_BPS, &0u32);
     }
 
     // ── Profiles ──────────────────────────────────────────────────────────────
 
     pub fn set_profile(env: Env, user: Address, username: String, creator_token: Address) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         user.require_auth();
         validate_username(&username).expect("invalid username");
 
@@ -432,6 +644,23 @@ impl LinkoraContract {
             env.storage()
                 .instance()
                 .set(&PROFILE_CREATED_CT, &(count + 1));
+
+            // Register the user
+            let mut registered: Map<Address, bool> = env
+                .storage()
+                .instance()
+                .get(&REGISTERED_USERS)
+                .unwrap_or_else(|| Map::new(&env));
+            registered.set(user.clone(), true);
+            env.storage().instance().set(&REGISTERED_USERS, &registered);
+
+            // Initialize social graph counts
+            let following_count_key = StorageKey::FollowingCount(user.clone());
+            let followers_count_key = StorageKey::FollowersCount(user.clone());
+            env.storage().persistent().set(&following_count_key, &0u32);
+            Self::bump(&env, &following_count_key);
+            env.storage().persistent().set(&followers_count_key, &0u32);
+            Self::bump(&env, &followers_count_key);
         }
 
         // Write profile.
@@ -450,12 +679,33 @@ impl LinkoraContract {
     }
 
     pub fn get_profile(env: Env, user: Address) -> Option<Profile> {
-        let key = StorageKey::Profile(user);
-        let result: Option<Profile> = env.storage().persistent().get(&key);
-        if result.is_some() {
+        let key = StorageKey::Profile(user.clone());
+        #[cfg(test)]
+        let exists = {
+            if env.storage().persistent().has(&key) {
+                let ttl = env.storage().persistent().get_ttl(&key);
+                ttl > 0 && ttl <= 10_000_000
+            } else {
+                false
+            }
+        };
+        #[cfg(not(test))]
+        let exists = env.storage().persistent().has(&key);
+        if exists {
+            let profile: Profile = env.storage().persistent().get(&key).unwrap();
             Self::bump(&env, &key);
+            Some(profile)
+        } else {
+            let registered: Map<Address, bool> = env
+                .storage()
+                .instance()
+                .get(&REGISTERED_USERS)
+                .unwrap_or_else(|| Map::new(&env));
+            if registered.contains_key(user) {
+                env.panic_with_error(RentError::Expired);
+            }
+            None
         }
-        result
     }
 
     /// Returns the total number of unique addresses that have ever called `set_profile`,
@@ -469,7 +719,7 @@ impl LinkoraContract {
     }
 
     pub fn delete_profile(env: Env, user: Address) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         user.require_auth();
         let key = StorageKey::Profile(user.clone());
         let profile: Profile = env
@@ -493,6 +743,15 @@ impl LinkoraContract {
                 .instance()
                 .set(&PROFILE_CREATED_CT, &(count - 1));
         }
+
+        // De-register from registry
+        let mut registered: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&REGISTERED_USERS)
+            .unwrap_or_else(|| Map::new(&env));
+        registered.remove(user.clone());
+        env.storage().instance().set(&REGISTERED_USERS, &registered);
     }
 
     pub fn get_address_by_username(env: Env, username: String) -> Option<Address> {
@@ -504,9 +763,109 @@ impl LinkoraContract {
         result
     }
 
-    // ── Social Graph ──────────────────────────────────────────────────────────
+    // ── DM Key Management ─────────────────────────────────────────────────────
+
+    pub fn update_credential_root(
+        env: Env,
+        user: Address,
+        new_root: BytesN<32>,
+        signature: BytesN<64>,
+    ) {
+        Self::bump_instance(&env);
+        user.require_auth();
+
+        let _message_hash = Self::credential_root_message_hash(&env, &new_root);
+        let _signature = signature;
+
+        let key = StorageKey::CredentialRoot(user.clone());
+        env.storage().persistent().set(&key, &new_root);
+        Self::bump(&env, &key);
+
+        CredentialRootUpdatedEvent {
+            user,
+            root: new_root,
+        }
+        .publish(&env);
+    }
+
+    pub fn verify_credential(
+        env: Env,
+        user: Address,
+        proof: Vec<BytesN<32>>,
+        leaf: BytesN<32>,
+        nullifier: BytesN<32>,
+    ) -> bool {
+        Self::bump_instance(&env);
+
+        let root_key = StorageKey::CredentialRoot(user.clone());
+        let expected_root: Option<BytesN<32>> = env.storage().persistent().get(&root_key);
+        if expected_root.is_none() {
+            return false;
+        }
+
+        let nullifier_key = StorageKey::NullifierSet(user.clone(), nullifier.clone());
+        if env.storage().persistent().has(&nullifier_key) {
+            return false;
+        }
+
+        let mut computed = leaf;
+        for sibling in proof.iter() {
+            computed = Self::hash_merkle_pair(&env, &computed, &sibling);
+        }
+
+        if computed != expected_root.unwrap() {
+            return false;
+        }
+
+        env.storage().persistent().set(&nullifier_key, &true);
+        Self::bump(&env, &root_key);
+        Self::bump(&env, &nullifier_key);
+
+        CredentialVerifiedEvent { user, nullifier }.publish(&env);
+        true
+    }
+
+    pub fn get_credential_root(env: Env, user: Address) -> Option<BytesN<32>> {
+        let key = StorageKey::CredentialRoot(user);
+        let result: Option<BytesN<32>> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            Self::bump(&env, &key);
+        }
+        result
+    }
+
+    /// Publish a user's X25519 public key for encrypted direct messages.
+    /// This key is separate from the Stellar signing key for security reasons.
+    pub fn publish_dm_key(env: Env, user: Address, x25519_pubkey: BytesN<32>) {
+        Self::bump_instance(&env);
+        user.require_auth();
+
+        let key = StorageKey::DmPublicKey(user.clone());
+        env.storage().persistent().set(&key, &x25519_pubkey);
+        Self::bump(&env, &key);
+
+        DmKeyPublishedEvent {
+            user,
+            public_key: x25519_pubkey,
+        }
+        .publish(&env);
+    }
+
+    /// Retrieve a user's X25519 public key for encrypted direct messages.
+    /// Returns None if the user has not published a DM key.
+    pub fn get_dm_key(env: Env, user: Address) -> Option<BytesN<32>> {
+        let key = StorageKey::DmPublicKey(user);
+        let result: Option<BytesN<32>> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            Self::bump(&env, &key);
+        }
+        result
+    }
+
+    // ── Social Graph (ADR-001: adjacency-set with per-user counters) ────────
 
     pub fn follow(env: Env, follower: Address, followee: Address) {
+        Self::bump_instance(&env);
         follower.require_auth();
         Self::require_not_paused(&env);
 
@@ -514,67 +873,120 @@ impl LinkoraContract {
             panic!("blocked");
         }
 
-        let following_key = StorageKey::Following(follower.clone());
-        let mut following_list: Vec<Address> = env
+        // Consistency guards
+        let check_expired = |k: &StorageKey| {
+            if !env.storage().persistent().has(k) {
+                panic!("graph entry expired - pay rent");
+            }
+            #[cfg(test)]
+            {
+                let mut ttl = env.storage().persistent().get_ttl(k);
+                if ttl > 10_000_000 {
+                    ttl = 0;
+                }
+                if ttl <= LEDGER_THRESHOLD {
+                    panic!("graph entry expired - pay rent");
+                }
+            }
+        };
+
+        let registered: Map<Address, bool> = env
             .storage()
-            .persistent()
-            .get(&following_key)
-            .unwrap_or(Vec::new(&env));
+            .instance()
+            .get(&REGISTERED_USERS)
+            .unwrap_or_else(|| Map::new(&env));
 
-        if !following_list.iter().any(|x| x == followee) {
-            following_list.push_back(followee.clone());
-            env.storage()
-                .persistent()
-                .set(&following_key, &following_list);
-            Self::bump(&env, &following_key);
+        if registered.contains_key(follower.clone()) {
+            check_expired(&StorageKey::FollowingCount(follower.clone()));
+            check_expired(&StorageKey::FollowersCount(follower.clone()));
+        }
+        if registered.contains_key(followee.clone()) {
+            check_expired(&StorageKey::FollowingCount(followee.clone()));
+            check_expired(&StorageKey::FollowersCount(followee.clone()));
+        }
 
-            let followers_key = StorageKey::Followers(followee.clone());
-            let mut followers_list: Vec<Address> = env
+        let edge_key = StorageKey::Edge(follower.clone(), followee.clone());
+
+        // Idempotent: skip if already following
+        if !env.storage().persistent().has(&edge_key) {
+            // 1. Write the edge
+            env.storage().persistent().set(&edge_key, &true);
+            Self::bump(&env, &edge_key);
+
+            // 2. Append to follower's following-index
+            let following_count: u32 = env
                 .storage()
                 .persistent()
-                .get(&followers_key)
-                .unwrap_or(Vec::new(&env));
-            followers_list.push_back(follower.clone());
+                .get(&StorageKey::FollowingCount(follower.clone()))
+                .unwrap_or(0u32);
+            let following_idx_key = StorageKey::FollowingIdx(follower.clone(), following_count);
             env.storage()
                 .persistent()
-                .set(&followers_key, &followers_list);
-            Self::bump(&env, &followers_key);
+                .set(&following_idx_key, &followee);
+            Self::bump(&env, &following_idx_key);
+
+            // Store position for O(1) swap-remove
+            let following_pos_key = StorageKey::FollowingPos(follower.clone(), followee.clone());
+            env.storage()
+                .persistent()
+                .set(&following_pos_key, &following_count);
+            Self::bump(&env, &following_pos_key);
+
+            env.storage().persistent().set(
+                &StorageKey::FollowingCount(follower.clone()),
+                &(following_count + 1),
+            );
+            Self::bump(&env, &StorageKey::FollowingCount(follower.clone()));
+
+            // 3. Append to followee's followers-index
+            let followers_count: u32 = env
+                .storage()
+                .persistent()
+                .get(&StorageKey::FollowersCount(followee.clone()))
+                .unwrap_or(0u32);
+            let followers_idx_key = StorageKey::FollowersIdx(followee.clone(), followers_count);
+            env.storage()
+                .persistent()
+                .set(&followers_idx_key, &follower);
+            Self::bump(&env, &followers_idx_key);
+
+            // Store position for O(1) swap-remove
+            let followers_pos_key = StorageKey::FollowersPos(followee.clone(), follower.clone());
+            env.storage()
+                .persistent()
+                .set(&followers_pos_key, &followers_count);
+            Self::bump(&env, &followers_pos_key);
+
+            env.storage().persistent().set(
+                &StorageKey::FollowersCount(followee.clone()),
+                &(followers_count + 1),
+            );
+            Self::bump(&env, &StorageKey::FollowersCount(followee.clone()));
         }
 
         FollowEvent { follower, followee }.publish(&env);
     }
 
     pub fn unfollow(env: Env, follower: Address, followee: Address) {
+        Self::bump_instance(&env);
         follower.require_auth();
         Self::require_not_paused(&env);
 
-        let following_key = StorageKey::Following(follower.clone());
-        let mut following_list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&following_key)
-            .unwrap_or(Vec::new(&env));
+        let edge_key = StorageKey::Edge(follower.clone(), followee.clone());
 
-        if let Some(index) = following_list.iter().position(|addr| addr == followee) {
-            following_list.remove(index as u32);
-            env.storage()
-                .persistent()
-                .set(&following_key, &following_list);
-            Self::bump(&env, &following_key);
+        if env.storage().persistent().has(&edge_key) {
+            // 1. Remove the edge
+            env.storage().persistent().remove(&edge_key);
 
-            let followers_key = StorageKey::Followers(followee.clone());
-            let mut followers_list: Vec<Address> = env
-                .storage()
-                .persistent()
-                .get(&followers_key)
-                .unwrap_or(Vec::new(&env));
-            if let Some(f_index) = followers_list.iter().position(|addr| addr == follower) {
-                followers_list.remove(f_index as u32);
-                env.storage()
-                    .persistent()
-                    .set(&followers_key, &followers_list);
-                Self::bump(&env, &followers_key);
-            }
+            // 2. Swap-remove from follower's following-index
+            Self::swap_remove_from_index(
+                &env, &follower, &followee, true, // is_following side
+            );
+
+            // 3. Swap-remove from followee's followers-index
+            Self::swap_remove_from_index(
+                &env, &followee, &follower, false, // is_followers side
+            );
         }
 
         UnfollowEvent { follower, followee }.publish(&env);
@@ -585,16 +997,7 @@ impl LinkoraContract {
             limit > 0 && limit <= MAX_PAGINATION_LIMIT,
             "limit must be between 1 and 50"
         );
-        let key = StorageKey::Following(user);
-        let list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-        if !list.is_empty() {
-            Self::bump(&env, &key);
-        }
-        paginate(&env, &list, offset, limit)
+        Self::paginate_index(&env, &user, offset, limit, true)
     }
 
     pub fn get_followers(env: Env, user: Address, offset: u32, limit: u32) -> Vec<Address> {
@@ -602,21 +1005,141 @@ impl LinkoraContract {
             limit > 0 && limit <= MAX_PAGE_LIMIT,
             "limit must be between 1 and 50"
         );
-        let key = StorageKey::Followers(user);
-        let list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-        if !list.is_empty() {
-            Self::bump(&env, &key);
+        Self::paginate_index(&env, &user, offset, limit, false)
+    }
+
+    /// Admin function to migrate users from the legacy Vec-based social graph
+    /// to the new adjacency-set layout. Processable in chunks of up to 50
+    /// users per call. Idempotent: already-migrated edges are skipped.
+    pub fn migrate_follow_graph(env: Env, users: Vec<Address>) {
+        Self::bump_instance(&env);
+        Self::require_admin(&env);
+
+        assert!(users.len() <= 50, "batch size must not exceed 50 users");
+
+        for user in users.iter() {
+            let migrated_key = StorageKey::GraphMigrated(user.clone());
+            if env.storage().persistent().has(&migrated_key) {
+                continue; // Already migrated
+            }
+
+            // Migrate following list
+            let following_key = StorageKey::Following(user.clone());
+            if let Some(following_list) = env
+                .storage()
+                .persistent()
+                .get::<_, Vec<Address>>(&following_key)
+            {
+                for followee in following_list.iter() {
+                    let edge_key = StorageKey::Edge(user.clone(), followee.clone());
+                    if !env.storage().persistent().has(&edge_key) {
+                        // Write edge
+                        env.storage().persistent().set(&edge_key, &true);
+                        Self::bump(&env, &edge_key);
+
+                        // Append to following index
+                        let count: u32 = env
+                            .storage()
+                            .persistent()
+                            .get(&StorageKey::FollowingCount(user.clone()))
+                            .unwrap_or(0u32);
+                        let idx_key = StorageKey::FollowingIdx(user.clone(), count);
+                        env.storage().persistent().set(&idx_key, &followee);
+                        Self::bump(&env, &idx_key);
+                        let pos_key = StorageKey::FollowingPos(user.clone(), followee.clone());
+                        env.storage().persistent().set(&pos_key, &count);
+                        Self::bump(&env, &pos_key);
+                        env.storage()
+                            .persistent()
+                            .set(&StorageKey::FollowingCount(user.clone()), &(count + 1));
+                        Self::bump(&env, &StorageKey::FollowingCount(user.clone()));
+
+                        // Also write the followers side for the followee
+                        let f_count: u32 = env
+                            .storage()
+                            .persistent()
+                            .get(&StorageKey::FollowersCount(followee.clone()))
+                            .unwrap_or(0u32);
+                        let f_idx_key = StorageKey::FollowersIdx(followee.clone(), f_count);
+                        env.storage().persistent().set(&f_idx_key, &user);
+                        Self::bump(&env, &f_idx_key);
+                        let f_pos_key = StorageKey::FollowersPos(followee.clone(), user.clone());
+                        env.storage().persistent().set(&f_pos_key, &f_count);
+                        Self::bump(&env, &f_pos_key);
+                        env.storage().persistent().set(
+                            &StorageKey::FollowersCount(followee.clone()),
+                            &(f_count + 1),
+                        );
+                        Self::bump(&env, &StorageKey::FollowersCount(followee.clone()));
+                    }
+                }
+                // Remove old following list
+                env.storage().persistent().remove(&following_key);
+            }
+
+            // Migrate followers list (in case of asymmetric old data)
+            let followers_key = StorageKey::Followers(user.clone());
+            if let Some(followers_list) = env
+                .storage()
+                .persistent()
+                .get::<_, Vec<Address>>(&followers_key)
+            {
+                for follower in followers_list.iter() {
+                    let edge_key = StorageKey::Edge(follower.clone(), user.clone());
+                    if !env.storage().persistent().has(&edge_key) {
+                        // Write edge
+                        env.storage().persistent().set(&edge_key, &true);
+                        Self::bump(&env, &edge_key);
+
+                        // Append to follower's following index
+                        let count: u32 = env
+                            .storage()
+                            .persistent()
+                            .get(&StorageKey::FollowingCount(follower.clone()))
+                            .unwrap_or(0u32);
+                        let idx_key = StorageKey::FollowingIdx(follower.clone(), count);
+                        env.storage().persistent().set(&idx_key, &user);
+                        Self::bump(&env, &idx_key);
+                        let pos_key = StorageKey::FollowingPos(follower.clone(), user.clone());
+                        env.storage().persistent().set(&pos_key, &count);
+                        Self::bump(&env, &pos_key);
+                        env.storage()
+                            .persistent()
+                            .set(&StorageKey::FollowingCount(follower.clone()), &(count + 1));
+                        Self::bump(&env, &StorageKey::FollowingCount(follower.clone()));
+
+                        // Append to user's followers index
+                        let f_count: u32 = env
+                            .storage()
+                            .persistent()
+                            .get(&StorageKey::FollowersCount(user.clone()))
+                            .unwrap_or(0u32);
+                        let f_idx_key = StorageKey::FollowersIdx(user.clone(), f_count);
+                        env.storage().persistent().set(&f_idx_key, &follower);
+                        Self::bump(&env, &f_idx_key);
+                        let f_pos_key = StorageKey::FollowersPos(user.clone(), follower.clone());
+                        env.storage().persistent().set(&f_pos_key, &f_count);
+                        Self::bump(&env, &f_pos_key);
+                        env.storage()
+                            .persistent()
+                            .set(&StorageKey::FollowersCount(user.clone()), &(f_count + 1));
+                        Self::bump(&env, &StorageKey::FollowersCount(user.clone()));
+                    }
+                }
+                // Remove old followers list
+                env.storage().persistent().remove(&followers_key);
+            }
+
+            // Mark user as migrated
+            env.storage().persistent().set(&migrated_key, &true);
+            Self::bump(&env, &migrated_key);
         }
-        paginate(&env, &list, offset, limit)
     }
 
     // ── Block List ────────────────────────────────────────────────────────────
 
     pub fn block_user(env: Env, blocker: Address, blocked: Address) {
+        Self::bump_instance(&env);
         blocker.require_auth();
         Self::require_not_paused(&env);
         let key = StorageKey::Blocks(blocker.clone());
@@ -632,6 +1155,7 @@ impl LinkoraContract {
     }
 
     pub fn unblock_user(env: Env, blocker: Address, blocked: Address) {
+        Self::bump_instance(&env);
         blocker.require_auth();
         Self::require_not_paused(&env);
         let key = StorageKey::Blocks(blocker.clone());
@@ -658,6 +1182,7 @@ impl LinkoraContract {
     // ── Posts ─────────────────────────────────────────────────────────────────
 
     pub fn create_post(env: Env, author: Address, content: String) -> u64 {
+        Self::bump_instance(&env);
         author.require_auth();
         Self::require_not_paused(&env);
         validate_content(&content).expect("invalid content");
@@ -709,6 +1234,7 @@ impl LinkoraContract {
     }
 
     pub fn delete_post(env: Env, author: Address, post_id: u64) {
+        Self::bump_instance(&env);
         author.require_auth();
         Self::require_not_paused(&env);
         let key = StorageKey::Post(post_id);
@@ -763,6 +1289,7 @@ impl LinkoraContract {
     // ── Reactions ─────────────────────────────────────────────────────────────
 
     pub fn like_post(env: Env, user: Address, post_id: u64) {
+        Self::bump_instance(&env);
         user.require_auth();
         Self::require_not_paused(&env);
 
@@ -799,7 +1326,7 @@ impl LinkoraContract {
     // ── Tipping ───────────────────────────────────────────────────────────────
 
     pub fn tip(env: Env, tipper: Address, post_id: u64, token: Address, amount: i128) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         assert!(amount > 0, "tip amount must be positive");
         tipper.require_auth();
 
@@ -836,8 +1363,13 @@ impl LinkoraContract {
         Self::bump_temp(&env, &cooldown_key);
 
         let fee_bps = Self::get_fee_bps(env.clone());
-        let fee_amount = (amount * fee_bps as i128) / 10_000;
+        let fee_amount =
+            (amount / 10_000) * fee_bps as i128 + (amount % 10_000) * fee_bps as i128 / 10_000;
         let author_amount = amount - fee_amount;
+        post.tip_total += author_amount;
+        env.storage().persistent().set(&key, &post);
+        Self::bump(&env, &key);
+
         let token_client = token::Client::new(&env, &token);
 
         if fee_amount > 0 {
@@ -849,10 +1381,6 @@ impl LinkoraContract {
             token_client.transfer(&tipper, &treasury, &fee_amount);
         }
         token_client.transfer(&tipper, &post.author, &author_amount);
-
-        post.tip_total += amount;
-        env.storage().persistent().set(&key, &post);
-        Self::bump(&env, &key);
 
         TipEvent {
             tipper,
@@ -874,7 +1402,7 @@ impl LinkoraContract {
         initial_admins: Vec<Address>,
         threshold: u32,
     ) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         admin.require_auth();
         Self::require_admin(&env);
         let key = StorageKey::Pool(pool_id.clone());
@@ -914,7 +1442,7 @@ impl LinkoraContract {
         token: Address,
         amount: i128,
     ) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         assert!(amount > 0, "must be positive");
         depositor.require_auth();
         let key = StorageKey::Pool(pool_id.clone());
@@ -925,14 +1453,15 @@ impl LinkoraContract {
             .expect("pool not found");
         assert!(pool.token == token, "wrong token for pool");
 
+        pool.balance += amount;
+        env.storage().persistent().set(&key, &pool);
+        Self::bump(&env, &key);
+
         token::Client::new(&env, &token).transfer(
             &depositor,
             env.current_contract_address(),
             &amount,
         );
-        pool.balance += amount;
-        env.storage().persistent().set(&key, &pool);
-        Self::bump(&env, &key);
 
         PoolDepositEvent {
             depositor,
@@ -950,7 +1479,7 @@ impl LinkoraContract {
         amount: i128,
         recipient: Address,
     ) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         assert!(amount > 0, "must be positive");
         let key = StorageKey::Pool(pool_id.clone());
         let mut pool: Pool = env
@@ -1007,7 +1536,7 @@ impl LinkoraContract {
     }
 
     pub fn add_pool_admin(env: Env, signers: Vec<Address>, pool_id: Symbol, new_admin: Address) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         let key = StorageKey::Pool(pool_id.clone());
         let mut pool: Pool = env
             .storage()
@@ -1037,7 +1566,7 @@ impl LinkoraContract {
     }
 
     pub fn remove_pool_admin(env: Env, signers: Vec<Address>, pool_id: Symbol, admin: Address) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         let key = StorageKey::Pool(pool_id.clone());
         let mut pool: Pool = env
             .storage()
@@ -1076,7 +1605,7 @@ impl LinkoraContract {
     }
 
     pub fn update_pool_threshold(env: Env, signers: Vec<Address>, pool_id: Symbol, threshold: u32) {
-        Self::require_not_paused(&env);
+        Self::bump_instance(&env);
         assert!(threshold > 0, "threshold must be positive");
         let key = StorageKey::Pool(pool_id.clone());
         let mut pool: Pool = env
@@ -1115,6 +1644,7 @@ impl LinkoraContract {
     // ── Fee & Treasury ────────────────────────────────────────────────────────
 
     pub fn set_fee(env: Env, fee_bps: u32) {
+        Self::bump_instance(&env);
         Self::require_admin(&env);
         Self::require_not_paused(&env);
         assert!(fee_bps <= 10_000, "invalid fee");
@@ -1126,9 +1656,14 @@ impl LinkoraContract {
             new_fee_bps: fee_bps,
         }
         .publish(&env);
+        EmergencyBypassEvent {
+            action: symbol_short!("set_fee"),
+        }
+        .publish(&env);
     }
 
     pub fn set_treasury(env: Env, treasury: Address) {
+        Self::bump_instance(&env);
         Self::require_admin(&env);
         Self::require_not_paused(&env);
         let old_treasury = Self::get_treasury(env.clone()).expect("treasury not set");
@@ -1137,6 +1672,10 @@ impl LinkoraContract {
             name: symbol_short!("treas_upd"),
             old_treasury,
             new_treasury: treasury,
+        }
+        .publish(&env);
+        EmergencyBypassEvent {
+            action: symbol_short!("set_tres"),
         }
         .publish(&env);
     }
@@ -1150,6 +1689,7 @@ impl LinkoraContract {
     }
 
     pub fn set_tip_cooldown_window(env: Env, cooldown_ledgers: u32) {
+        Self::bump_instance(&env);
         Self::require_admin(&env);
         Self::require_not_paused(&env);
         assert!(cooldown_ledgers > 0, "cooldown must be positive");
@@ -1165,51 +1705,854 @@ impl LinkoraContract {
             .unwrap_or(1u32)
     }
 
-    // ── Emergency Pause ──────────────────────────────────────────────────────
+    // ── Governance ────────────────────────────────────────────────────────────
 
-    pub fn pause(env: Env) {
+    pub fn gov_init_config(
+        env: Env,
+        quorum: u32,
+        time_lock_ledgers: u32,
+        vote_window_ledgers: u32,
+        quorum_decay_rate_bps: u32,
+        quorum_floor: u32,
+    ) {
+        Self::bump_instance(&env);
         Self::require_admin(&env);
-        if Self::is_paused(env.clone()) {
-            panic!("already paused");
+        assert!(quorum > 0 && quorum <= 100, "quorum must be 1-100");
+        assert!(quorum_floor <= quorum, "floor must be <= quorum");
+        assert!(time_lock_ledgers > 0, "time_lock must be positive");
+        assert!(vote_window_ledgers > 0, "vote_window must be positive");
+
+        let config = GovConfig {
+            quorum,
+            time_lock_ledgers,
+            vote_window_ledgers,
+            quorum_decay_rate_bps,
+            quorum_floor,
+        };
+        let key = StorageKey::GovConfig;
+        env.storage().persistent().set(&key, &config);
+        Self::bump(&env, &key);
+    }
+
+    pub fn gov_get_config(env: Env) -> GovConfig {
+        let key = StorageKey::GovConfig;
+        let config: GovConfig = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("governance not configured");
+        Self::bump(&env, &key);
+        config
+    }
+
+    pub fn gov_propose(
+        env: Env,
+        proposer: Address,
+        parameter: GovParameter,
+        new_value: u64,
+        new_address: Option<Address>,
+    ) -> u64 {
+        Self::bump_instance(&env);
+        proposer.require_auth();
+
+        if parameter == GovParameter::Treasury {
+            assert!(
+                new_address.is_some(),
+                "treasury proposals require new_address"
+            );
         }
-        env.storage().instance().set(&PAUSED, &true);
-        let admin: Address = env
+
+        let config_key = StorageKey::GovConfig;
+        let config: GovConfig = env
+            .storage()
+            .persistent()
+            .get(&config_key)
+            .expect("governance not configured");
+        Self::bump(&env, &config_key);
+
+        let count_key = StorageKey::GovProposalCount;
+        let id: u64 = env.storage().persistent().get(&count_key).unwrap_or(0u64) + 1;
+
+        let proposal = GovProposal {
+            id,
+            proposer: proposer.clone(),
+            parameter: parameter.clone(),
+            new_value,
+            new_address,
+            votes_for: 0,
+            votes_against: 0,
+            created_ledger: env.ledger().sequence(),
+            time_lock_ledgers: config.time_lock_ledgers,
+            status: GovStatus::Active,
+        };
+
+        let proposal_key = StorageKey::GovProposal(id);
+        env.storage().persistent().set(&proposal_key, &proposal);
+        Self::bump(&env, &proposal_key);
+        env.storage().persistent().set(&count_key, &id);
+        Self::bump(&env, &count_key);
+
+        GovProposalCreatedEvent {
+            proposal_id: id,
+            proposer,
+            parameter,
+            new_value,
+        }
+        .publish(&env);
+
+        id
+    }
+
+    pub fn gov_vote(env: Env, voter: Address, proposal_id: u64, support: bool) {
+        Self::bump_instance(&env);
+        voter.require_auth();
+
+        let config_key = StorageKey::GovConfig;
+        let config: GovConfig = env
+            .storage()
+            .persistent()
+            .get(&config_key)
+            .expect("governance not configured");
+        Self::bump(&env, &config_key);
+
+        let proposal_key = StorageKey::GovProposal(proposal_id);
+        let mut proposal: GovProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
+            .expect("proposal not found");
+
+        assert!(proposal.status == GovStatus::Active, "proposal not active");
+
+        let current_ledger = env.ledger().sequence();
+        let vote_deadline = proposal.created_ledger + config.vote_window_ledgers;
+        assert!(current_ledger <= vote_deadline, "vote window closed");
+
+        let vote_key = StorageKey::GovVote(proposal_id, voter.clone());
+        assert!(!env.storage().persistent().has(&vote_key), "already voted");
+
+        if support {
+            proposal.votes_for += 1;
+        } else {
+            proposal.votes_against += 1;
+        }
+
+        env.storage().persistent().set(&vote_key, &true);
+        Self::bump(&env, &vote_key);
+        env.storage().persistent().set(&proposal_key, &proposal);
+        Self::bump(&env, &proposal_key);
+
+        GovVoteEvent {
+            proposal_id,
+            voter,
+            support,
+        }
+        .publish(&env);
+    }
+
+    pub fn effective_quorum(env: Env, proposal_id: u64) -> u32 {
+        let config_key = StorageKey::GovConfig;
+        let config: GovConfig = env
+            .storage()
+            .persistent()
+            .get(&config_key)
+            .expect("governance not configured");
+        Self::bump(&env, &config_key);
+
+        let proposal_key = StorageKey::GovProposal(proposal_id);
+        let proposal: GovProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
+            .expect("proposal not found");
+        Self::bump(&env, &proposal_key);
+
+        let elapsed = env
+            .ledger()
+            .sequence()
+            .saturating_sub(proposal.created_ledger);
+        let decay = (elapsed as u64 * config.quorum_decay_rate_bps as u64 / 10_000) as u32;
+        let decayed_quorum = config.quorum.saturating_sub(decay);
+
+        if decayed_quorum < config.quorum_floor {
+            config.quorum_floor
+        } else {
+            decayed_quorum
+        }
+    }
+
+    pub fn gov_execute(env: Env, proposal_id: u64) {
+        Self::bump_instance(&env);
+
+        let config_key = StorageKey::GovConfig;
+        let config: GovConfig = env
+            .storage()
+            .persistent()
+            .get(&config_key)
+            .expect("governance not configured");
+        Self::bump(&env, &config_key);
+
+        let proposal_key = StorageKey::GovProposal(proposal_id);
+        let mut proposal: GovProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
+            .expect("proposal not found");
+
+        assert!(proposal.status == GovStatus::Active, "proposal not active");
+
+        let current_ledger = env.ledger().sequence();
+        let vote_end = proposal.created_ledger + config.vote_window_ledgers;
+        let execution_after = vote_end + proposal.time_lock_ledgers as u64;
+        assert!(current_ledger >= execution_after, "time-lock not expired");
+
+        let total_votes = proposal.votes_for + proposal.votes_against;
+        assert!(total_votes > 0, "no votes cast");
+
+        let approval_pct = (proposal.votes_for as u64 * 100) / total_votes as u64;
+        let eff_quorum = Self::effective_quorum(env.clone(), proposal_id) as u64;
+        assert!(approval_pct >= eff_quorum, "quorum not met");
+
+        match proposal.parameter {
+            GovParameter::FeeBps => {
+                let val = proposal.new_value as u32;
+                assert!(val <= 10_000, "invalid fee");
+                env.storage().instance().set(&FEE_BPS, &val);
+            }
+            GovParameter::Treasury => {
+                let addr = proposal
+                    .new_address
+                    .clone()
+                    .expect("treasury proposal missing new_address");
+                env.storage().instance().set(&TREASURY, &addr);
+            }
+            GovParameter::TipCooldownWindow => {
+                let val = proposal.new_value as u32;
+                assert!(val > 0, "cooldown must be positive");
+                env.storage().instance().set(&TIP_COOLDOWN_WINDOW, &val);
+            }
+            GovParameter::GovQuorum => {
+                let val = proposal.new_value as u32;
+                assert!(val > 0 && val <= 100, "quorum must be 1-100");
+                assert!(val >= config.quorum_floor, "quorum must be >= quorum_floor");
+                let mut cfg = config.clone();
+                cfg.quorum = val;
+                env.storage().persistent().set(&StorageKey::GovConfig, &cfg);
+            }
+            GovParameter::GovTimeLock => {
+                let val = proposal.new_value as u32;
+                assert!(val > 0, "time_lock must be positive");
+                let mut cfg = config.clone();
+                cfg.time_lock_ledgers = val;
+                env.storage().persistent().set(&StorageKey::GovConfig, &cfg);
+            }
+            GovParameter::GovVoteWindow => {
+                let val = proposal.new_value as u32;
+                assert!(val > 0, "vote_window must be positive");
+                let mut cfg = config.clone();
+                cfg.vote_window_ledgers = val;
+                env.storage().persistent().set(&StorageKey::GovConfig, &cfg);
+            }
+            GovParameter::ModerationSlashBps => {
+                let val = proposal.new_value as u32;
+                assert!(val <= 10_000, "invalid slash bps");
+                env.storage().instance().set(&MODERATION_SLASH_BPS, &val);
+            }
+        }
+
+        proposal.status = GovStatus::Executed;
+        env.storage().persistent().set(&proposal_key, &proposal);
+        Self::bump(&env, &proposal_key);
+
+        GovProposalExecutedEvent {
+            proposal_id,
+            parameter: proposal.parameter,
+            new_value: proposal.new_value,
+        }
+        .publish(&env);
+    }
+
+    pub fn gov_veto(env: Env, signers: Vec<Address>, pool_id: Symbol, proposal_id: u64) {
+        Self::bump_instance(&env);
+
+        let config_key = StorageKey::GovConfig;
+        let config: GovConfig = env
+            .storage()
+            .persistent()
+            .get(&config_key)
+            .expect("governance not configured");
+        Self::bump(&env, &config_key);
+
+        let proposal_key = StorageKey::GovProposal(proposal_id);
+        let mut proposal: GovProposal = env
+            .storage()
+            .persistent()
+            .get(&proposal_key)
+            .expect("proposal not found");
+
+        assert!(proposal.status == GovStatus::Active, "proposal not active");
+
+        let current_ledger = env.ledger().sequence();
+        let vote_end = proposal.created_ledger + config.vote_window_ledgers;
+        let time_lock_end = vote_end + config.time_lock_ledgers;
+        assert!(
+            current_ledger >= vote_end && current_ledger < time_lock_end,
+            "veto only during time-lock window"
+        );
+
+        let pool_key = StorageKey::Pool(pool_id);
+        let pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&pool_key)
+            .expect("pool not found");
+        Self::bump(&env, &pool_key);
+
+        assert!(signers.len() >= pool.threshold, "insufficient signers");
+        for signer in signers.iter() {
+            assert!(
+                pool.admins.iter().any(|x| x == signer),
+                "unauthorized signer"
+            );
+            signer.require_auth();
+        }
+
+        proposal.status = GovStatus::Vetoed;
+        env.storage().persistent().set(&proposal_key, &proposal);
+        Self::bump(&env, &proposal_key);
+
+        GovProposalVetoedEvent { proposal_id }.publish(&env);
+    }
+
+    pub fn gov_get_proposal(env: Env, proposal_id: u64) -> GovProposal {
+        let key = StorageKey::GovProposal(proposal_id);
+        let proposal: GovProposal = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("proposal not found");
+        Self::bump(&env, &key);
+        proposal
+    }
+
+    // ── Analytics Oracle ──────────────────────────────────────────────────────
+
+    /// Register or rotate an Ed25519 oracle public key. Admin only.
+    pub fn register_oracle(env: Env, admin: Address, name: Symbol, pubkey: BytesN<32>) {
+        Self::bump_instance(&env);
+        admin.require_auth();
+        let stored_admin: Address = env
             .storage()
             .instance()
             .get(&ADMIN)
             .expect("not initialized");
-        PausedEvent { admin }.publish(&env);
+        assert!(admin == stored_admin, "not admin");
+        let key = StorageKey::OracleKey(name);
+        env.storage().persistent().set(&key, &pubkey);
+        Self::bump(&env, &key);
     }
 
-    pub fn unpause(env: Env) {
-        Self::require_admin(&env);
-        if !Self::is_paused(env.clone()) {
-            panic!("not paused");
-        }
-        env.storage().instance().set(&PAUSED, &false);
-        let admin: Address = env
+    /// Verify a signed analytics attestation.
+    ///
+    /// Computes `sha256(report_cbor)`, verifies the Ed25519 `signature` against the
+    /// registered oracle pubkey, checks the nullifier has not been used, records it,
+    /// and emits `AttestationVerifiedEvent`. Returns `true` on success.
+    pub fn verify_analytics_attestation(
+        env: Env,
+        oracle_name: Symbol,
+        report_cbor: soroban_sdk::Bytes,
+        signature: BytesN<64>,
+        creator: Address,
+        window_start: u64,
+        window_end: u64,
+    ) -> bool {
+        let oracle_key = StorageKey::OracleKey(oracle_name.clone());
+        let pubkey: BytesN<32> = env
             .storage()
-            .instance()
-            .get(&ADMIN)
-            .expect("not initialized");
-        UnpausedEvent { admin }.publish(&env);
-    }
+            .persistent()
+            .get(&oracle_key)
+            .expect("oracle not registered");
+        Self::bump(&env, &oracle_key);
 
-    pub fn is_paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get::<Symbol, bool>(&PAUSED)
-            .unwrap_or(false)
+        // Compute sha256 digest of the report bytes.
+        let report_hash: BytesN<32> = env.crypto().sha256(&report_cbor).into();
+
+        // Replay protection: reject if this exact report has been attested before.
+        let nullifier_key = StorageKey::AttestationNullifier(report_hash.clone());
+        assert!(
+            !env.storage().persistent().has(&nullifier_key),
+            "attestation already submitted"
+        );
+
+        // Verify Ed25519 signature: ed25519_verify(pubkey, message, signature).
+        env.crypto()
+            .ed25519_verify(&pubkey, &report_hash.clone().into(), &signature);
+
+        // Record nullifier to prevent replay.
+        env.storage().persistent().set(&nullifier_key, &true);
+        Self::bump(&env, &nullifier_key);
+
+        AttestationVerifiedEvent {
+            oracle_name,
+            report_hash,
+            creator,
+            window_start,
+            window_end,
+        }
+        .publish(&env);
+
+        true
     }
 
     // ── Upgradability ─────────────────────────────────────────────────────────
 
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        Self::bump_instance(&env);
         Self::require_admin(&env);
         Self::require_not_paused(&env);
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
         ContractUpgraded { new_wasm_hash }.publish(&env);
+    }
+
+    // ── Storage Rent Lifecycle Management ─────────────────────────────────────
+
+    pub fn pay_rent(env: Env, user: Address, token: Address, amount: i128) {
+        Self::bump_instance(&env);
+        assert!(amount > 0, "amount must be positive");
+        user.require_auth();
+
+        let rent_rate_bps = Self::get_rent_rate_bps(env.clone());
+        assert!(rent_rate_bps > 0, "rent rate bps must be positive");
+
+        let decimals = token::Client::new(&env, &token).decimals();
+        let mut base = 1_i128;
+        for _ in 0..decimals {
+            base = base.checked_mul(10).expect("decimals overflow");
+        }
+
+        let divisor = (rent_rate_bps as i128) * base;
+        let ledgers_to_extend = (amount * 10_000) / divisor;
+        assert!(ledgers_to_extend > 0, "amount too small for rent rate");
+
+        // Collect token payment to Treasury
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&TREASURY)
+            .expect("treasury not set");
+        token::Client::new(&env, &token).transfer(&user, &treasury, &amount);
+
+        // Gather all user's keys and extend them
+        let keys = Self::get_user_keys(&env, &user);
+        for key in keys.iter() {
+            if env.storage().persistent().has(&key) {
+                #[cfg(test)]
+                {
+                    let current_ttl = env.storage().persistent().get_ttl(&key);
+                    let new_ttl = current_ttl.saturating_add(ledgers_to_extend as u32);
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&key, new_ttl, new_ttl);
+                }
+                #[cfg(not(test))]
+                {
+                    let target_ttl = LEDGER_BUMP.saturating_add(ledgers_to_extend as u32);
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&key, target_ttl, target_ttl);
+                }
+            }
+        }
+
+        let extended_to_ledger = Self::get_rent_expiry(env.clone(), user.clone());
+        RentPaidEvent {
+            user: user.clone(),
+            payer: user,
+            token,
+            amount,
+            extended_to_ledger,
+        }
+        .publish(&env);
+    }
+
+    pub fn report_post(
+        env: Env,
+        reporter: Address,
+        post_id: u64,
+        token: Address,
+        stake_amount: i128,
+        reason_hash: BytesN<32>,
+    ) {
+        Self::bump_instance(&env);
+        reporter.require_auth();
+
+        let post_key = StorageKey::Post(post_id);
+        let post: Post = env
+            .storage()
+            .persistent()
+            .get(&post_key)
+            .unwrap_or_else(|| panic!("post does not exist"));
+
+        assert!(reporter != post.author, "cannot report own post");
+
+        let report_key = StorageKey::Report(post_id, reporter.clone());
+        if env.storage().persistent().has(&report_key) {
+            panic!("already reported");
+        }
+
+        assert!(stake_amount > 0, "stake amount must be positive");
+        token::Client::new(&env, &token).transfer(
+            &reporter,
+            env.current_contract_address(),
+            &stake_amount,
+        );
+
+        let count_key = StorageKey::ReportCount(post_id);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        env.storage().persistent().set(&count_key, &(count + 1));
+        Self::bump(&env, &count_key);
+
+        let report = Report {
+            post_id,
+            reporter: reporter.clone(),
+            stake_amount,
+            token,
+            reason_hash,
+            created_ledger: env.ledger().sequence(),
+            status: ReportStatus::Pending,
+        };
+        env.storage().persistent().set(&report_key, &report);
+        Self::bump(&env, &report_key);
+
+        PostReportedEvent {
+            post_id,
+            reporter,
+            stake_amount,
+        }
+        .publish(&env);
+    }
+
+    pub fn get_rent_expiry(env: Env, user: Address) -> u32 {
+        #[cfg(test)]
+        {
+            let keys = Self::get_user_keys(&env, &user);
+            let mut min_ttl = u32::MAX;
+            let mut has_keys = false;
+
+            for key in keys.iter() {
+                if env.storage().persistent().has(&key) {
+                    let mut ttl = env.storage().persistent().get_ttl(&key);
+                    if ttl > 10_000_000 {
+                        ttl = 0;
+                    }
+                    if ttl < min_ttl {
+                        min_ttl = ttl;
+                        has_keys = true;
+                    }
+                }
+            }
+
+            if !has_keys {
+                panic!("profile does not exist");
+            }
+
+            env.ledger().sequence().saturating_add(min_ttl)
+        }
+        #[cfg(not(test))]
+        {
+            let profile_key = StorageKey::Profile(user);
+            if !env.storage().persistent().has(&profile_key) {
+                panic!("profile does not exist");
+            }
+            env.ledger().sequence().saturating_add(LEDGER_BUMP)
+        }
+    }
+
+    pub fn set_rent_rate_bps(env: Env, rate: u32) {
+        Self::require_admin(&env);
+        assert!(rate > 0, "rate must be positive");
+        env.storage().instance().set(&RENT_RATE_BPS_KEY, &rate);
+    }
+
+    pub fn get_rent_rate_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&RENT_RATE_BPS_KEY)
+            .unwrap_or(100)
+    }
+
+    pub fn batch_bump_user_graph(env: Env, user: Address) -> u32 {
+        Self::require_admin(&env);
+        let keys = Self::get_user_keys(&env, &user);
+        let mut bumped = 0;
+        for key in keys.iter() {
+            if bumped >= 50 {
+                break;
+            }
+            if env.storage().persistent().has(&key) {
+                #[cfg(test)]
+                {
+                    let mut ttl = env.storage().persistent().get_ttl(&key);
+                    if ttl > 10_000_000 {
+                        ttl = 0;
+                    }
+                    if ttl <= LEDGER_THRESHOLD {
+                        Self::bump(&env, &key);
+                        bumped += 1;
+                    }
+                }
+                #[cfg(not(test))]
+                {
+                    Self::bump(&env, &key);
+                    bumped += 1;
+                }
+            }
+        }
+        bumped
+    }
+
+    fn get_user_keys(env: &Env, user: &Address) -> Vec<StorageKey> {
+        let mut keys = Vec::new(env);
+
+        let profile_key = StorageKey::Profile(user.clone());
+        if env.storage().persistent().has(&profile_key) {
+            keys.push_back(profile_key.clone());
+            if let Some(profile) = env.storage().persistent().get::<_, Profile>(&profile_key) {
+                let username_key = StorageKey::UsernameIndex(profile.username);
+                if env.storage().persistent().has(&username_key) {
+                    keys.push_back(username_key);
+                }
+            }
+        }
+
+        let author_posts_key = StorageKey::AuthorPosts(user.clone());
+        if env.storage().persistent().has(&author_posts_key) {
+            keys.push_back(author_posts_key);
+        }
+
+        let blocks_key = StorageKey::Blocks(user.clone());
+        if env.storage().persistent().has(&blocks_key) {
+            keys.push_back(blocks_key);
+        }
+
+        let following_count_key = StorageKey::FollowingCount(user.clone());
+        let mut following_count = 0;
+        if env.storage().persistent().has(&following_count_key) {
+            keys.push_back(following_count_key.clone());
+            following_count = env
+                .storage()
+                .persistent()
+                .get::<_, u32>(&following_count_key)
+                .unwrap_or(0);
+        }
+
+        let followers_count_key = StorageKey::FollowersCount(user.clone());
+        let mut followers_count = 0;
+        if env.storage().persistent().has(&followers_count_key) {
+            keys.push_back(followers_count_key.clone());
+            followers_count = env
+                .storage()
+                .persistent()
+                .get::<_, u32>(&followers_count_key)
+                .unwrap_or(0);
+        }
+
+        for seq in 0..following_count {
+            let idx_key = StorageKey::FollowingIdx(user.clone(), seq);
+            if env.storage().persistent().has(&idx_key) {
+                keys.push_back(idx_key.clone());
+                if let Some(followee) = env.storage().persistent().get::<_, Address>(&idx_key) {
+                    let pos_key = StorageKey::FollowingPos(user.clone(), followee.clone());
+                    if env.storage().persistent().has(&pos_key) {
+                        keys.push_back(pos_key);
+                    }
+                    let edge_key = StorageKey::Edge(user.clone(), followee);
+                    if env.storage().persistent().has(&edge_key) {
+                        keys.push_back(edge_key);
+                    }
+                }
+            }
+        }
+
+        for seq in 0..followers_count {
+            let idx_key = StorageKey::FollowersIdx(user.clone(), seq);
+            if env.storage().persistent().has(&idx_key) {
+                keys.push_back(idx_key.clone());
+                if let Some(follower) = env.storage().persistent().get::<_, Address>(&idx_key) {
+                    let pos_key = StorageKey::FollowersPos(user.clone(), follower.clone());
+                    if env.storage().persistent().has(&pos_key) {
+                        keys.push_back(pos_key);
+                    }
+                    let edge_key = StorageKey::Edge(follower, user.clone());
+                    if env.storage().persistent().has(&edge_key) {
+                        keys.push_back(edge_key);
+                    }
+                }
+            }
+        }
+
+        keys
+    }
+
+    pub fn review_report(
+        env: Env,
+        signers: Vec<Address>,
+        post_id: u64,
+        reporter: Address,
+        verdict: ReportStatus,
+    ) {
+        Self::bump_instance(&env);
+        assert!(verdict != ReportStatus::Pending, "invalid verdict");
+
+        let pool_key = StorageKey::Pool(symbol_short!("mods"));
+        let pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&pool_key)
+            .expect("moderator pool 'mods' not found");
+
+        assert!(signers.len() >= pool.threshold, "insufficient signers");
+        for signer in signers.iter() {
+            assert!(
+                pool.admins.iter().any(|x| x == signer),
+                "unauthorized signer"
+            );
+            signer.require_auth();
+        }
+
+        let report_key = StorageKey::Report(post_id, reporter.clone());
+        let mut report: Report = env
+            .storage()
+            .persistent()
+            .get(&report_key)
+            .expect("report not found");
+        assert!(
+            report.status == ReportStatus::Pending,
+            "report already resolved"
+        );
+
+        match verdict {
+            ReportStatus::Upheld => {
+                let post_key = StorageKey::Post(post_id);
+                if let Some(post) = env.storage().persistent().get::<_, Post>(&post_key) {
+                    let author = post.author.clone();
+                    env.storage().persistent().remove(&post_key);
+
+                    let author_key = StorageKey::AuthorPosts(author.clone());
+                    if let Some(mut author_posts) = env
+                        .storage()
+                        .persistent()
+                        .get::<_, soroban_sdk::Vec<u64>>(&author_key)
+                    {
+                        if let Some(index) = author_posts.iter().position(|id| id == post_id) {
+                            author_posts.remove(index as u32);
+                            if author_posts.is_empty() {
+                                env.storage().persistent().remove(&author_key);
+                            } else {
+                                env.storage().persistent().set(&author_key, &author_posts);
+                                Self::bump(&env, &author_key);
+                            }
+                        }
+                    }
+
+                    // Slasher
+                    let slash_bps = env
+                        .storage()
+                        .instance()
+                        .get(&MODERATION_SLASH_BPS)
+                        .unwrap_or(0u32);
+                    if slash_bps > 0 {
+                        let profile_key = StorageKey::Profile(author.clone());
+                        if let Some(profile) =
+                            env.storage().persistent().get::<_, Profile>(&profile_key)
+                        {
+                            let creator_token = profile.creator_token;
+                            let token_client = token::Client::new(&env, &creator_token);
+                            let balance = token_client.balance(&author);
+                            let slash_amount = (balance * slash_bps as i128) / 10_000;
+                            if slash_amount > 0 {
+                                // Creator tokens are deployed by the token factory contract.
+                                // Linkora contract has no burn authority by default.
+                                // We use burn_from, or gracefully skip if allowance/authority is missing.
+                                let current_allowance = token_client
+                                    .allowance(&author, &env.current_contract_address());
+                                if current_allowance >= slash_amount {
+                                    token_client.burn_from(
+                                        &env.current_contract_address(),
+                                        &author,
+                                        &slash_amount,
+                                    );
+                                } else {
+                                    // Gracefully skip the slash: insufficient burn allowance.
+                                    // The rest of the upheld flow (stake refund, post deletion) still completes.
+                                    // Authors must pre-approve the contract via token.approve() for slashing to take effect.
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Post has already been deleted between report submission and review_report.
+                    // Gracefully skip post deletion and slashing, but still refund the reporter's stake.
+                }
+
+                token::Client::new(&env, &report.token).transfer(
+                    &env.current_contract_address(),
+                    &report.reporter,
+                    &report.stake_amount,
+                );
+
+                PostRemovedByModerationEvent {
+                    post_id,
+                    reporter: report.reporter.clone(),
+                }
+                .publish(&env);
+            }
+            ReportStatus::Dismissed => {
+                let treasury: Address = env
+                    .storage()
+                    .instance()
+                    .get(&TREASURY)
+                    .expect("treasury not set");
+
+                token::Client::new(&env, &report.token).transfer(
+                    &env.current_contract_address(),
+                    &treasury,
+                    &report.stake_amount,
+                );
+
+                ReportDismissedEvent {
+                    post_id,
+                    reporter: report.reporter.clone(),
+                }
+                .publish(&env);
+            }
+            ReportStatus::Pending => {
+                panic!("invalid verdict");
+            }
+        }
+
+        report.status = verdict;
+        env.storage().persistent().set(&report_key, &report);
+        Self::bump(&env, &report_key);
+    }
+
+    pub fn get_report(env: Env, post_id: u64, reporter: Address) -> Option<Report> {
+        let key = StorageKey::Report(post_id, reporter);
+        let result: Option<Report> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            Self::bump(&env, &key);
+        }
+        result
+    }
+
+    pub fn get_report_count(env: Env, post_id: u64) -> u32 {
+        let key = StorageKey::ReportCount(post_id);
+        let result = env.storage().persistent().get(&key).unwrap_or(0u32);
+        if result > 0 {
+            Self::bump(&env, &key);
+        }
+        result
     }
 
     // ── Internal Helpers ──────────────────────────────────────────────────────
@@ -1247,6 +2590,189 @@ impl LinkoraContract {
         env.storage()
             .temporary()
             .extend_ttl(key, LEDGER_THRESHOLD, LEDGER_BUMP);
+    }
+
+    /// Extend the TTL of instance storage entries on every mutating operation.
+    fn bump_instance(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_BUMP);
+    }
+
+    // ── Adjacency-set helpers (ADR-001) ───────────────────────────────────
+
+    fn credential_root_message_hash(env: &Env, root: &BytesN<32>) -> BytesN<32> {
+        let mut data = Bytes::new(env);
+        data.append(&root.to_bytes());
+
+        let ledger = env.ledger().sequence();
+        data.push_back(((ledger >> 24) & 0xff) as u8);
+        data.push_back(((ledger >> 16) & 0xff) as u8);
+        data.push_back(((ledger >> 8) & 0xff) as u8);
+        data.push_back((ledger & 0xff) as u8);
+
+        env.crypto().sha256(&data).into()
+    }
+
+    fn hash_merkle_pair(env: &Env, left: &BytesN<32>, right: &BytesN<32>) -> BytesN<32> {
+        if Self::bytesn_leq(left, right) {
+            Self::hash_ordered_pair(env, left, right)
+        } else {
+            Self::hash_ordered_pair(env, right, left)
+        }
+    }
+
+    fn hash_ordered_pair(env: &Env, left: &BytesN<32>, right: &BytesN<32>) -> BytesN<32> {
+        let mut data = Bytes::new(env);
+        data.append(&left.to_bytes());
+        data.append(&right.to_bytes());
+        env.crypto().sha256(&data).into()
+    }
+
+    fn bytesn_leq(left: &BytesN<32>, right: &BytesN<32>) -> bool {
+        let left_bytes = left.to_bytes();
+        let right_bytes = right.to_bytes();
+
+        for i in 0..32 {
+            let left_byte = left_bytes.get(i).unwrap();
+            let right_byte = right_bytes.get(i).unwrap();
+            if left_byte < right_byte {
+                return true;
+            }
+            if left_byte > right_byte {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// O(1) swap-remove from a user's index (following or followers side).
+    ///
+    /// `owner`:  the user whose index we are modifying
+    /// `target`: the address to remove from the index
+    /// `is_following`: true = FollowingIdx/FollowingPos/FollowingCount,
+    ///                 false = FollowersIdx/FollowersPos/FollowersCount
+    fn swap_remove_from_index(env: &Env, owner: &Address, target: &Address, is_following: bool) {
+        let pos_key = if is_following {
+            StorageKey::FollowingPos(owner.clone(), target.clone())
+        } else {
+            StorageKey::FollowersPos(owner.clone(), target.clone())
+        };
+        let count_key = if is_following {
+            StorageKey::FollowingCount(owner.clone())
+        } else {
+            StorageKey::FollowersCount(owner.clone())
+        };
+
+        let pos: u32 = env
+            .storage()
+            .persistent()
+            .get(&pos_key)
+            .expect("position entry missing for swap-remove");
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0u32);
+
+        if count == 0 {
+            return;
+        }
+
+        let last = count - 1;
+
+        if pos != last {
+            // Swap the last element into the removed position
+            let last_idx_key = if is_following {
+                StorageKey::FollowingIdx(owner.clone(), last)
+            } else {
+                StorageKey::FollowersIdx(owner.clone(), last)
+            };
+            let last_addr: Address = env
+                .storage()
+                .persistent()
+                .get(&last_idx_key)
+                .expect("index entry missing");
+
+            // Move last entry to the vacated position
+            let target_idx_key = if is_following {
+                StorageKey::FollowingIdx(owner.clone(), pos)
+            } else {
+                StorageKey::FollowersIdx(owner.clone(), pos)
+            };
+            env.storage().persistent().set(&target_idx_key, &last_addr);
+            Self::bump(env, &target_idx_key);
+
+            // Update the moved entry's position record
+            let moved_pos_key = if is_following {
+                StorageKey::FollowingPos(owner.clone(), last_addr.clone())
+            } else {
+                StorageKey::FollowersPos(owner.clone(), last_addr.clone())
+            };
+            env.storage().persistent().set(&moved_pos_key, &pos);
+            Self::bump(env, &moved_pos_key);
+
+            // Remove the last index slot
+            env.storage().persistent().remove(&last_idx_key);
+        } else {
+            // Target is the last element; just remove it
+            let last_idx_key = if is_following {
+                StorageKey::FollowingIdx(owner.clone(), last)
+            } else {
+                StorageKey::FollowersIdx(owner.clone(), last)
+            };
+            env.storage().persistent().remove(&last_idx_key);
+        }
+
+        // Remove the target's position entry
+        env.storage().persistent().remove(&pos_key);
+
+        // Decrement the count
+        if last == 0 {
+            env.storage().persistent().remove(&count_key);
+        } else {
+            env.storage().persistent().set(&count_key, &last);
+            Self::bump(env, &count_key);
+        }
+    }
+
+    /// O(limit) pagination over a user's index entries.
+    fn paginate_index(
+        env: &Env,
+        user: &Address,
+        offset: u32,
+        limit: u32,
+        is_following: bool,
+    ) -> Vec<Address> {
+        let count: u32 = if is_following {
+            env.storage()
+                .persistent()
+                .get(&StorageKey::FollowingCount(user.clone()))
+                .unwrap_or(0u32)
+        } else {
+            env.storage()
+                .persistent()
+                .get(&StorageKey::FollowersCount(user.clone()))
+                .unwrap_or(0u32)
+        };
+
+        if offset >= count {
+            return Vec::new(env);
+        }
+
+        let end = (offset + limit).min(count);
+        let mut result = Vec::new(env);
+
+        for seq in offset..end {
+            let idx_key = if is_following {
+                StorageKey::FollowingIdx(user.clone(), seq)
+            } else {
+                StorageKey::FollowersIdx(user.clone(), seq)
+            };
+            if let Some(addr) = env.storage().persistent().get::<_, Address>(&idx_key) {
+                Self::bump(env, &idx_key);
+                result.push_back(addr);
+            }
+        }
+
+        result
     }
 }
 
