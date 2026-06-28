@@ -21,11 +21,39 @@ import {
 } from "../notifications/service";
 import { PostgresDatabase } from "../postgres-db";
 
+// ── CORS middleware ───────────────────────────────────────────────────────────
+
+function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "*")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const origin = req.headers.origin;
+  if (origin) {
+    if (allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+
+  next();
+}
+
 // ── App factory ───────────────────────────────────────────────────────────────
 
 export function createApp(db: Database, pg?: PgPool): express.Application {
   const app = express();
   app.use(express.json());
+  app.use(corsMiddleware);
 
   const startTime = Date.now();
   const version = process.env.npm_package_version ?? "0.1.0";

@@ -57,6 +57,7 @@ const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const pgPool = new Pool({ connectionString: DATABASE_URL });
 const notificationService = new NotificationService({
   deviceTokenStore: new PostgresDeviceTokenStore(pgPool),
+  pool: pgPool,
 });
 
 /**
@@ -141,6 +142,19 @@ async function ensureSchema(): Promise<void> {
       address       TEXT PRIMARY KEY,
       x25519_pubkey TEXT NOT NULL,
       updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+      address              TEXT PRIMARY KEY,
+      browser_push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      new_followers        BOOLEAN NOT NULL DEFAULT TRUE,
+      new_likes            BOOLEAN NOT NULL DEFAULT TRUE,
+      new_comments         BOOLEAN NOT NULL DEFAULT TRUE,
+      direct_messages      BOOLEAN NOT NULL DEFAULT TRUE,
+      pool_activity        BOOLEAN NOT NULL DEFAULT TRUE,
+      governance_updates   BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 }
