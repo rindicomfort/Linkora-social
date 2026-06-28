@@ -32,6 +32,7 @@ import { NotificationService, PostgresDeviceTokenStore } from "./notifications/s
 import { createApp } from "./api";
 import { createDomainProcessor } from "./domain-processor";
 import { PostgresDatabase } from "./postgres-db";
+import { ScoreRefreshService } from "./score-refresh";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -51,13 +52,19 @@ const STELLAR_RPC_URL = requireEnv("STELLAR_RPC_URL");
 const CONTRACT_ID = requireEnv("CONTRACT_ID");
 const START_LEDGER = parseInt(requireEnv("START_LEDGER"), 10);
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const SCORE_REFRESH_INTERVAL_MINUTES = parseInt(
+  process.env.SCORE_REFRESH_INTERVAL_MINUTES ?? "5",
+  10
+);
 
 // ── Database ──────────────────────────────────────────────────────────────────
 
 const pgPool = new Pool({ connectionString: DATABASE_URL });
 const notificationService = new NotificationService({
   deviceTokenStore: new PostgresDeviceTokenStore(pgPool),
+  pool: pgPool,
 });
+const scoreRefreshService = new ScoreRefreshService(pgPool, SCORE_REFRESH_INTERVAL_MINUTES);
 
 /**
  * Idempotently ensure the staging table and cursor exist. Mirrors
@@ -143,6 +150,19 @@ async function ensureSchema(): Promise<void> {
       updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
     )
   `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+      address              TEXT PRIMARY KEY,
+      browser_push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      new_followers        BOOLEAN NOT NULL DEFAULT TRUE,
+      new_likes            BOOLEAN NOT NULL DEFAULT TRUE,
+      new_comments         BOOLEAN NOT NULL DEFAULT TRUE,
+      direct_messages      BOOLEAN NOT NULL DEFAULT TRUE,
+      pool_activity        BOOLEAN NOT NULL DEFAULT TRUE,
+      governance_updates   BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 }
 
 // ── Event normalisation ─────────────────────────────────────────────────────
@@ -182,6 +202,7 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   console.log(`[indexer] Received ${signal}, shutting down…`);
   abortController.abort();
+  scoreRefreshService.stop();
   detachNotificationDispatcher();
   await wsHandle.close();
   httpServer.close();
@@ -254,6 +275,9 @@ async function main(): Promise<void> {
   httpServer.listen(PORT, () => {
     console.log(`[indexer] HTTP + WS listening on :${PORT} (ws path /ws)`);
   });
+
+  // Start score refresh service
+  scoreRefreshService.start();
 
   // Start gossip in the background.
   startGossip(pgPool, abortController.signal).catch((err) =>
