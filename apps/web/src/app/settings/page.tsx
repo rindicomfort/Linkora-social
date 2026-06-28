@@ -44,7 +44,7 @@ export default function SettingsPage() {
         <DmKeySection address={address} />
 
         {/* Notifications Section */}
-        <NotificationsSection />
+        <NotificationsSection address={address} />
 
         {/* Block List Section */}
         <BlockListSection address={address} />
