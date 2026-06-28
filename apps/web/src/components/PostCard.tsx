@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 export interface Post {
   id: string | number;
   author: string;
@@ -76,6 +78,25 @@ function formatAuthor(author: string): string {
 }
 
 export function PostCard({ post, query, onLike, onTip, isLiked, isTipping }: PostCardProps) {
+  const likeCount = getPostLikeCount(post);
+  const [animateLikeCount, setAnimateLikeCount] = useState(false);
+  const [previousLikeCount, setPreviousLikeCount] = useState(likeCount);
+
+  useEffect(() => {
+    if (likeCount === previousLikeCount) {
+      return;
+    }
+
+    setAnimateLikeCount(true);
+    setPreviousLikeCount(likeCount);
+
+    const timeout = window.setTimeout(() => {
+      setAnimateLikeCount(false);
+    }, 220);
+
+    return () => window.clearTimeout(timeout);
+  }, [likeCount, previousLikeCount]);
+
   return (
     <article className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3 md:p-4 lg:p-5 shadow-lg transition-all duration-300 hover:border-violet-500/40 hover:shadow-violet-950/10">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-[var(--text-muted)]">
@@ -103,8 +124,12 @@ export function PostCard({ post, query, onLike, onTip, isLiked, isTipping }: Pos
           }`}
           aria-label={isLiked ? "Unlike post" : "Like post"}
         >
-          <span className="text-lg">{isLiked ? "❤️" : "🤍"}</span>
-          <span>{getPostLikeCount(post)}</span>
+          <span
+            className={`text-lg transition-transform duration-200 ${animateLikeCount ? "scale-110" : "scale-100"}`}
+          >
+            {isLiked ? "❤️" : "🤍"}
+          </span>
+          <span className={animateLikeCount ? "like-count-animate" : ""}>{likeCount}</span>
         </button>
 
         {/* Tip Button */}

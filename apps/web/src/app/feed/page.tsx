@@ -8,6 +8,8 @@ import { OptimisticStore, useOptimisticLike, useOptimisticTip } from "@/lib/opti
 import { LinkoraClient } from "../../../../../packages/sdk/src/client";
 import { validateAmount, validateStellarAddress } from "@/lib/validate";
 import { FieldError } from "@/components/forms/FieldError";
+import { OnboardingGuard } from "@/components/onboarding/OnboardingGuard";
+import { AnimatedList } from "@/components/AnimatedList";
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /*  Config & Constants                                                       */
@@ -368,77 +370,50 @@ export default function FeedPage() {
   /* ── UI Render ──────────────────────────────────────────────────────── */
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] pb-12">
-      {/* Real-time Toast Banner */}
-      {hasNewPosts && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
-          <button
-            onClick={handleRefreshFeed}
-            className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm px-5 py-2.5 rounded-full shadow-xl transition-all border border-violet-400/30"
-          >
-            ✨ New posts available! Click to refresh
-          </button>
-        </div>
-      )}
-
-      <div className="mx-auto max-w-2xl px-4 py-8">
-        <header className="mb-8">
-          <h1 className="text-3xl font-extrabold tracking-tight mb-6">Home Feed</h1>
-
-          {/* Navigation Tabs */}
-          <div className="flex border-b border-[var(--border)] gap-6">
+    <OnboardingGuard>
+      <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] pb-12">
+        {/* Real-time Toast Banner */}
+        {hasNewPosts && (
+          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
             <button
-              onClick={() => setActiveTab("explore")}
-              className={`pb-3 text-base font-semibold transition-all relative ${
-                activeTab === "explore"
-                  ? "text-[var(--foreground)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
-              }`}
+              onClick={handleRefreshFeed}
+              className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm px-5 py-2.5 rounded-full shadow-xl transition-all border border-violet-400/30"
             >
-              Explore
-              {activeTab === "explore" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-violet-500 rounded-full" />
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab("following")}
-              className={`pb-3 text-base font-semibold transition-all relative ${
-                activeTab === "following"
-                  ? "text-[var(--foreground)]"
-                  : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
-              }`}
-            >
-              Following
-              {activeTab === "following" && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-violet-500 rounded-full" />
-              )}
+              ✨ New posts available! Click to refresh
             </button>
           </div>
-        </header>
+        )}
 
-        {/* Auth required wall for Following Tab */}
-        {activeTab === "following" && (!connected || !currentUserAddress) ? (
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-6 md:p-8 text-center shadow-lg">
-            <div className="text-4xl mb-4">🔒</div>
-            <h2 className="text-xl font-bold mb-2">Connect Your Wallet</h2>
-            <p className="text-[var(--text-muted)] mb-6 max-w-sm mx-auto">
-              Follow developers and creators to view a personalized feed of their latest posts.
-            </p>
-            <button
-              onClick={connect}
-              className="bg-violet-600 hover:bg-violet-500 text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md"
-            >
-              Connect Wallet
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Error Message */}
-            {error && (
-              <div
-                className="bg-red-950/40 border border-red-800 text-red-200 px-4 py-3 rounded-xl mb-4 text-sm"
-                role="alert"
+        <div className="mx-auto max-w-2xl px-4 py-8">
+          <header className="mb-8">
+            <h1 className="text-3xl font-extrabold tracking-tight mb-6">Home Feed</h1>
+
+            {/* Navigation Tabs */}
+            <div className="flex border-b border-[var(--border)] gap-6">
+              <button
+                onClick={() => setActiveTab("explore")}
+                className={`pb-3 text-base font-semibold transition-all relative ${
+                  activeTab === "explore"
+                    ? "text-[var(--foreground)]"
+                    : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                }`}
               >
+                Explore
+                {activeTab === "explore" && (
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-violet-500 rounded-full" />
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab("following")}
+                className={`pb-3 text-base font-semibold transition-all relative ${
+                  activeTab === "following"
+                    ? "text-[var(--foreground)]"
+                    : "text-[var(--text-muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                Following
+                {activeTab === "following" && (
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-violet-500 rounded-full" />
                 ⚠️ {error}
               </div>
             )}
@@ -471,7 +446,7 @@ export default function FeedPage() {
                         />
                       </svg>
                     </div>
-                    <h3 className="text-lg font-bold mb-1">You&apos;re not following anyone yet</h3>
+                    <h2 className="text-lg font-bold mb-1">You&apos;re not following anyone yet</h2>
                     <p className="text-[var(--text-muted)] text-sm mb-6 max-w-xs mx-auto">
                       Follow creators you like to see their latest posts in your feed.
                     </p>
@@ -514,7 +489,7 @@ export default function FeedPage() {
                         />
                       </svg>
                     </div>
-                    <h3 className="text-lg font-bold mb-1">No posts found</h3>
+                    <h2 className="text-lg font-bold mb-1">No posts found</h2>
                     <p className="text-[var(--text-muted)] text-sm mb-6">
                       {activeTab === "following"
                         ? "Accounts you follow haven't posted yet."
@@ -534,7 +509,7 @@ export default function FeedPage() {
             ) : (
               /* Feed list */
               <>
-                <div className="space-y-4">
+                <div className="space-y-4" role="feed" aria-label="Post feed">
                   {posts.map((post) => (
                     <InteractivePostCard
                       key={post.id}
@@ -559,82 +534,235 @@ export default function FeedPage() {
                     )}
                   </div>
                 )}
-              </>
-            )}
+              </button>
+            </div>
+          </header>
+
+          {/* Auth required wall for Following Tab */}
+          {activeTab === "following" && (!connected || !currentUserAddress) ? (
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-6 md:p-8 text-center shadow-lg">
+              <div className="text-4xl mb-4">🔒</div>
+              <h2 className="text-xl font-bold mb-2">Connect Your Wallet</h2>
+              <p className="text-[var(--text-muted)] mb-6 max-w-sm mx-auto">
+                Follow developers and creators to view a personalized feed of their latest posts.
+              </p>
+              <button
+                onClick={connect}
+                className="bg-violet-600 hover:bg-violet-500 text-white font-semibold px-6 py-2.5 rounded-xl transition-all shadow-md"
+                onClick={handleCloseTipModal}
+                className="text-[var(--text-muted)] hover:text-[var(--foreground)] text-xl transition-colors"
+                aria-label="Close tip modal"
+              >
+                Connect Wallet
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Error Message */}
+              {error && (
+                <div
+                  className="bg-red-950/40 border border-red-800 text-red-200 px-4 py-3 rounded-xl mb-4 text-sm"
+                  role="alert"
+                >
+                  ⚠️ {error}
+                </div>
+              )}
+
+              {/* Skeletons on initial load */}
+              {loading ? (
+                <div className="space-y-4">
+                  <PostCardSkeleton />
+                  <PostCardSkeleton />
+                  <PostCardSkeleton />
+                </div>
+              ) : posts.length === 0 ? (
+                /* Empty state */
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)]/50 p-12 text-center">
+                  {activeTab === "following" && followsNobody ? (
+                    <>
+                      <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--bg-tertiary)]">
+                        <svg
+                          className="w-8 h-8 text-[var(--text-muted)]"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={1.5}
+                          stroke="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
+                          />
+                        </svg>
+                      </div>
+                      <h3 className="text-lg font-bold mb-1">
+                        You&apos;re not following anyone yet
+                      </h3>
+                      <p className="text-[var(--text-muted)] text-sm mb-6 max-w-xs mx-auto">
+                        Follow creators you like to see their latest posts in your feed.
+                      </p>
+                      <Link
+                        href="/explore"
+                        className="inline-flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-all shadow-md"
+                      >
+                        Find people to follow
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={2}
+                          stroke="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
+                          />
+                        </svg>
+                      </Link>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--bg-tertiary)]">
+                        <svg
+                          className="w-8 h-8 text-[var(--text-muted)]"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={1.5}
+                          stroke="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V18a2.25 2.25 0 01-2.25 2.25M16.5 7.5V18a2.25 2.25 0 002.25 2.25M16.5 7.5V4.875c0-.621-.504-1.125-1.125-1.125H4.125C3.504 3.75 3 4.254 3 4.875V18a2.25 2.25 0 002.25 2.25h13.5M6 7.5h3v3H6v-3z"
+                          />
+                        </svg>
+                      </div>
+                      <h3 className="text-lg font-bold mb-1">No posts found</h3>
+                      <p className="text-[var(--text-muted)] text-sm mb-6">
+                        {activeTab === "following"
+                          ? "Accounts you follow haven't posted yet."
+                          : "Be the first one to share something with the community!"}
+                      </p>
+                      {activeTab === "following" && (
+                        <button
+                          onClick={() => setActiveTab("explore")}
+                          className="text-violet-400 hover:text-violet-300 font-semibold text-sm transition-colors"
+                        >
+                          Explore creators instead →
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                /* Feed list */
+                <>
+                  <div className="space-y-4">
+                    {posts.map((post) => (
+                      <InteractivePostCard
+                        key={post.id}
+                        post={post}
+                        currentUserAddress={currentUserAddress}
+                        onTipClick={handleOpenTipModal}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Infinite Scroll Sentinel / Loading More */}
+                  {hasMore && (
+                    <div ref={sentinelRef} className="py-6 text-center">
+                      {loadingMore ? (
+                        <span className="text-sm text-[var(--text-muted)] animate-pulse">
+                          Loading more posts…
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[var(--text-muted)]">
+                          Scroll down to load more
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Tipping Dialog Modal */}
+        {tippingPost && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-4 md:p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+              <header className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">Tip Creator</h2>
+                <button
+                  onClick={handleCloseTipModal}
+                  className="text-[var(--text-muted)] hover:text-[var(--foreground)] text-xl transition-colors"
+                >
+                  ✕
+                </button>
+              </header>
+
+              <form onSubmit={handleTipSubmit} className="space-y-4" noValidate>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" htmlFor="tip-token">
+                    Token Address <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="tip-token"
+                    type="text"
+                    placeholder="G..."
+                    value={tipToken}
+                    onChange={(e) => setTipToken(e.target.value)}
+                    className={`w-full rounded-xl border bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 ${
+                      tipErrors.token ? "border-red-500" : "border-[var(--border)]"
+                    }`}
+                  />
+                  <FieldError id="tip-token-error" message={tipErrors.token} />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" htmlFor="tip-amount">
+                    Amount <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="tip-amount"
+                    type="number"
+                    step="any"
+                    placeholder="0.00"
+                    value={tipAmount}
+                    onChange={(e) => setTipAmount(e.target.value)}
+                    className={`w-full rounded-xl border bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 ${
+                      tipErrors.amount ? "border-red-500" : "border-[var(--border)]"
+                    }`}
+                  />
+                  <FieldError id="tip-amount-error" message={tipErrors.amount} />
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3 justify-end pt-3">
+                  <button
+                    type="button"
+                    onClick={handleCloseTipModal}
+                    className="px-4.5 py-2 rounded-xl border border-[var(--border)] text-sm font-semibold hover:bg-[var(--bg-secondary)] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={tipSubmitting}
+                    className="px-5 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-500 transition-colors shadow-md disabled:opacity-50"
+                  >
+                    {tipSubmitting ? "Sending..." : "Send Tip"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>
-
-      {/* Tipping Dialog Modal */}
-      {tippingPost && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-4 md:p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <header className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">Tip Creator</h2>
-              <button
-                onClick={handleCloseTipModal}
-                className="text-[var(--text-muted)] hover:text-[var(--foreground)] text-xl transition-colors"
-              >
-                ✕
-              </button>
-            </header>
-
-            <form onSubmit={handleTipSubmit} className="space-y-4" noValidate>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" htmlFor="tip-token">
-                  Token Address <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="tip-token"
-                  type="text"
-                  placeholder="G..."
-                  value={tipToken}
-                  onChange={(e) => setTipToken(e.target.value)}
-                  className={`w-full rounded-xl border bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500 ${
-                    tipErrors.token ? "border-red-500" : "border-[var(--border)]"
-                  }`}
-                />
-                <FieldError id="tip-token-error" message={tipErrors.token} />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1.5" htmlFor="tip-amount">
-                  Amount <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="tip-amount"
-                  type="number"
-                  step="any"
-                  placeholder="0.00"
-                  value={tipAmount}
-                  onChange={(e) => setTipAmount(e.target.value)}
-                  className={`w-full rounded-xl border bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 ${
-                    tipErrors.amount ? "border-red-500" : "border-[var(--border)]"
-                  }`}
-                />
-                <FieldError id="tip-amount-error" message={tipErrors.amount} />
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3 justify-end pt-3">
-                <button
-                  type="button"
-                  onClick={handleCloseTipModal}
-                  className="px-4.5 py-2 rounded-xl border border-[var(--border)] text-sm font-semibold hover:bg-[var(--bg-secondary)] transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={tipSubmitting}
-                  className="px-5 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-500 transition-colors shadow-md disabled:opacity-50"
-                >
-                  {tipSubmitting ? "Sending..." : "Send Tip"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+    </OnboardingGuard>
   );
 }

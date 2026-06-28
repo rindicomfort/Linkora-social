@@ -181,6 +181,7 @@ export function SearchPageClient() {
             type="button"
             onClick={() => updateParams({ tab: "posts" })}
             className={`rounded-md px-4 py-2 text-sm font-semibold ${activeTab === "posts" ? "bg-violet-600 text-white" : "text-[var(--text-muted)] hover:text-[var(--foreground)]"}`}
+            aria-pressed={activeTab === "posts"}
           >
             Posts
           </button>
@@ -188,6 +189,7 @@ export function SearchPageClient() {
             type="button"
             onClick={() => updateParams({ tab: "profiles" })}
             className={`rounded-md px-4 py-2 text-sm font-semibold ${activeTab === "profiles" ? "bg-violet-600 text-white" : "text-[var(--text-muted)] hover:text-[var(--foreground)]"}`}
+            aria-pressed={activeTab === "profiles"}
           >
             Profiles
           </button>
@@ -230,7 +232,7 @@ export function SearchPageClient() {
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-500/50 bg-red-950/40 p-4 text-red-200">
+        <div className="mb-6 rounded-lg border border-red-500/50 bg-red-950/40 p-4 text-red-200" role="alert">
           {error}
         </div>
       )}

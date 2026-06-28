@@ -16,7 +16,7 @@ export function AdminList({ admins, threshold, currentUser }: AdminListProps) {
   return (
     <div style={styles.wrapper}>
       <div style={styles.header}>
-        <h3 style={styles.title}>Admins</h3>
+        <h2 style={styles.title}>Admins</h2>
         <ThresholdBadge threshold={threshold} total={admins.length} variant="compact" />
       </div>
 

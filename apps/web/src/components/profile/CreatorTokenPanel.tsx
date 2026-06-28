@@ -39,7 +39,7 @@ export function CreatorTokenPanel({
       aria-label="Creator Token details"
       className="bg-[var(--bg-secondary)] p-6 rounded-xl border border-[var(--bg-tertiary)] flex flex-col gap-4"
     >
-      <h3 className="text-lg font-semibold text-[var(--text-primary)]">Creator Token</h3>
+      <h2 className="text-lg font-semibold text-[var(--text-primary)]">Creator Token</h2>
 
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* Token Address */}

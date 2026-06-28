@@ -93,11 +93,14 @@ impl ContractModel {
             return Err("blocked".to_string());
         }
 
-        let f = self.users.entry(follower.clone()).or_insert_with(|| ModelUser {
-            followers: HashSet::new(),
-            following: HashSet::new(),
-            blocked: HashSet::new(),
-        });
+        let f = self
+            .users
+            .entry(follower.clone())
+            .or_insert_with(|| ModelUser {
+                followers: HashSet::new(),
+                following: HashSet::new(),
+                blocked: HashSet::new(),
+            });
 
         f.following.insert(followee.clone());
 
@@ -128,14 +131,11 @@ impl ContractModel {
             return Err("cannot block self".to_string());
         }
 
-        let user = self
-            .users
-            .entry(blocker)
-            .or_insert_with(|| ModelUser {
-                followers: HashSet::new(),
-                following: HashSet::new(),
-                blocked: HashSet::new(),
-            });
+        let user = self.users.entry(blocker).or_insert_with(|| ModelUser {
+            followers: HashSet::new(),
+            following: HashSet::new(),
+            blocked: HashSet::new(),
+        });
 
         user.blocked.insert(blockee);
         Ok(())
@@ -169,18 +169,12 @@ impl ContractModel {
         Ok(())
     }
 
-    pub fn tip(
-        &mut self,
-        tipper: String,
-        post_id: u64,
-        amount: i128,
-    ) -> Result<(), String> {
+    pub fn tip(&mut self, tipper: String, post_id: u64, amount: i128) -> Result<(), String> {
         if amount <= 0 {
             return Err("amount must be positive".to_string());
         }
 
-        let post = self.posts.get_mut(&post_id)
-            .ok_or("post not found")?;
+        let post = self.posts.get_mut(&post_id).ok_or("post not found")?;
 
         if self.is_blocked(&tipper, &post.author) {
             return Err("blocked".to_string());
@@ -196,8 +190,7 @@ impl ContractModel {
     }
 
     pub fn like(&mut self, liker: String, post_id: u64) -> Result<(), String> {
-        let post = self.posts.get_mut(&post_id)
-            .ok_or("post not found")?;
+        let post = self.posts.get_mut(&post_id).ok_or("post not found")?;
 
         if self.is_blocked(&liker, &post.author) {
             return Err("blocked".to_string());
@@ -236,8 +229,7 @@ impl ContractModel {
             return Err("amount must be positive".to_string());
         }
 
-        let pool = self.pools.get_mut(&pool_id)
-            .ok_or("pool not found")?;
+        let pool = self.pools.get_mut(&pool_id).ok_or("pool not found")?;
 
         pool.balance += amount;
         Ok(())
@@ -245,7 +237,11 @@ impl ContractModel {
 
     // ── Governance Operations ──
 
-    pub fn propose_quorum_change(&mut self, proposal_id: u64, new_quorum: u32) -> Result<(), String> {
+    pub fn propose_quorum_change(
+        &mut self,
+        proposal_id: u64,
+        new_quorum: u32,
+    ) -> Result<(), String> {
         if new_quorum < 1 || new_quorum > 100 {
             return Err("invalid quorum".to_string());
         }
@@ -271,7 +267,9 @@ impl ContractModel {
         current_ledger: u64,
         new_quorum: u32,
     ) -> Result<(), String> {
-        let proposal = self.proposals.get(&proposal_id)
+        let proposal = self
+            .proposals
+            .get(&proposal_id)
             .ok_or("proposal not found")?;
 
         // Check time-lock using snapshotted value
@@ -310,7 +308,9 @@ mod tests {
     #[test]
     fn test_model_follow_creates_adjacency() {
         let mut model = ContractModel::new();
-        model.follow("alice".to_string(), "bob".to_string()).unwrap();
+        model
+            .follow("alice".to_string(), "bob".to_string())
+            .unwrap();
 
         let alice = model.users.get("alice").unwrap();
         assert!(alice.following.contains("bob"));

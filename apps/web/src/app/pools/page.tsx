@@ -48,7 +48,7 @@ export default function PoolsPage() {
         <div style={styles.errorBanner} role="alert">
           <span aria-hidden="true">⚠️</span>
           <span>{error ?? "Failed to load pools"}</span>
-          <button onClick={refresh} style={styles.retryBtn}>
+          <button onClick={refresh} style={styles.retryBtn} aria-label="Retry loading pools">
             Retry
           </button>
         </div>
@@ -69,7 +69,7 @@ export default function PoolsPage() {
       {/* Pool grid */}
       {state === "success" && pools.length > 0 && (
         <>
-          <p style={styles.count} aria-live="polite">
+          <p style={styles.count} aria-live="polite" role="status">
             {pools.length} pool{pools.length !== 1 ? "s" : ""} found
           </p>
           <div style={styles.grid}>

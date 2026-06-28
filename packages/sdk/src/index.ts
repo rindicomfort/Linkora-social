@@ -6,6 +6,7 @@ export * from "./mini-apps/validateManifest";
 export * from "./generated/events";
 export * from "./events/cursor";
 export * from "./events/subscriber";
+export * from "./health";
 export type {
   FollowEvent,
   LikePostEvent as LikeEvent,

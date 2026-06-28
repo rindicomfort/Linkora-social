@@ -6,9 +6,12 @@ import Link from "next/link";
 interface PoolEmptyStateProps {
   variant?: "no-pools" | "zero-balance" | "not-found";
   poolId?: string;
+  /** Heading level: 2 (default) for standalone, 3 when nested inside a section with h2. */
+  headingLevel?: 2 | 3;
 }
 
-export function PoolEmptyState({ variant = "no-pools", poolId }: PoolEmptyStateProps) {
+export function PoolEmptyState({ variant = "no-pools", poolId, headingLevel = 2 }: PoolEmptyStateProps) {
+  const H = headingLevel === 3 ? "h3" : "h2";
   return (
     <div style={styles.wrapper} role="status" aria-live="polite">
       <div style={styles.illustration} aria-hidden="true">
@@ -17,7 +20,7 @@ export function PoolEmptyState({ variant = "no-pools", poolId }: PoolEmptyStateP
       <div style={styles.content}>
         {variant === "no-pools" && (
           <>
-            <h3 style={styles.title}>No pools available</h3>
+            <H style={styles.title}>No pools available</H>
             <p style={styles.body}>
               There are no active community pools right now. Create one to get started.
             </p>
@@ -28,13 +31,13 @@ export function PoolEmptyState({ variant = "no-pools", poolId }: PoolEmptyStateP
         )}
         {variant === "zero-balance" && (
           <>
-            <h3 style={styles.title}>Pool is empty</h3>
+            <H style={styles.title}>Pool is empty</H>
             <p style={styles.body}>This pool has no funds yet. Be the first to deposit.</p>
           </>
         )}
         {variant === "not-found" && (
           <>
-            <h3 style={styles.title}>Pool not found</h3>
+            <H style={styles.title}>Pool not found</H>
             <p style={styles.body}>
               No pool with ID <code style={styles.code}>{poolId}</code> exists. Check the ID and try
               again.

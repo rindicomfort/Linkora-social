@@ -32,6 +32,10 @@ class Database {
     console.log('Database initialized successfully');
   }
 
+  async ping(): Promise<void> {
+    await this.pool.query('SELECT 1');
+  }
+
   private async createTables(): Promise<void> {
     const createMessagesTable = `
       CREATE TABLE IF NOT EXISTS dm_messages (

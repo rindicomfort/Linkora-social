@@ -98,13 +98,13 @@ export function ProfileSection({ address }: ProfileSectionProps) {
       <p className="text-sm text-gray-600 mb-4">Update your username and creator token settings.</p>
 
       {successMessage && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm" role="status">
           {successMessage}
         </div>
       )}
 
       {errorMessage && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm" role="alert">
           {errorMessage}
         </div>
       )}

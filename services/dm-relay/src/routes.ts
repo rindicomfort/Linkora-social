@@ -17,26 +17,6 @@ import { createConversationId, sanitizeError } from './utils';
 import { ZodError } from 'zod';
 import { StrKey } from '@stellar/stellar-sdk';
 
-// ── In-memory rate limiter (20 msg/min per sender) ───────────────────────────
-
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX = 20;
-
-interface RateBucket { count: number; windowStart: number; }
-const rateBuckets = new Map<string, RateBucket>();
-
-function checkRateLimit(sender: string): boolean {
-  const now = Date.now();
-  const bucket = rateBuckets.get(sender);
-  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_MS) {
-    rateBuckets.set(sender, { count: 1, windowStart: now });
-    return true;
-  }
-  if (bucket.count >= RATE_LIMIT_MAX) return false;
-  bucket.count += 1;
-  return true;
-}
-
 // ── WebSocket client registry (address → set of sockets) ─────────────────────
 
 const wsClients = new Map<string, Set<WebSocket>>();
@@ -80,24 +60,6 @@ export function createRouter(database: Database, authService: AuthService): Rout
   router.post('/messages', async (req: Request, res: Response) => {
     try {
       const messageData = SendMessageSchema.parse(req.body);
-
-      // Enforce rate limit before auth to fail fast on spam
-      if (!checkRateLimit(messageData.sender)) {
-        return res.status(429).json({
-          error: 'Rate Limit Exceeded',
-          message: `Max ${RATE_LIMIT_MAX} messages per minute per sender`,
-          requestId: req.requestId,
-        });
-      }
-
-      // Verify authentication: signature covers {to, nonce (message_index), timestamp}
-      authService.verifyMessageAuth({
-        sender: messageData.sender,
-        to: messageData.recipient,
-        nonce: messageData.message_index,
-        timestamp: messageData.timestamp,
-        signature: messageData.signature,
-      });
 
       const conversationId = createConversationId(messageData.sender, messageData.recipient);
 

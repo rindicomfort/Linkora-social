@@ -7,6 +7,8 @@
  * callback that is invoked if a later step fails.
  */
 
+import { NetworkError, SigningError } from "./errors";
+
 export type TxStatus = "pending" | "submitted" | "confirmed" | "failed";
 
 export interface TxStatusEvent {
@@ -103,21 +105,25 @@ export class TransactionQueue {
         const error = err instanceof Error ? err.message : String(err);
         this.emit({ index: i, xdr: step.xdr, status: "failed", error });
         await this.runRollbacks(completed);
-        throw new Error(`Step ${i} signing failed: ${error}`);
+        throw new SigningError(`Step ${i} signing failed: ${error}`, { step: i }, err);
       }
 
       let hash: string;
       try {
         const result = await this.rpc.sendTransaction(signedXdr);
         if (result.status === "ERROR") {
-          throw new Error(result.errorResultXdr ?? "sendTransaction returned ERROR");
+          throw new NetworkError(result.errorResultXdr ?? "sendTransaction returned ERROR", {
+            step: i,
+          });
         }
         hash = result.hash;
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         this.emit({ index: i, xdr: step.xdr, status: "failed", error });
         await this.runRollbacks(completed);
-        throw new Error(`Step ${i} submission failed: ${error}`);
+        throw err instanceof NetworkError
+          ? err
+          : new NetworkError(`Step ${i} submission failed: ${error}`, { step: i }, err);
       }
 
       this.emit({ index: i, xdr: step.xdr, status: "submitted", hash });
@@ -128,7 +134,9 @@ export class TransactionQueue {
         const error = err instanceof Error ? err.message : String(err);
         this.emit({ index: i, xdr: step.xdr, status: "failed", hash, error });
         await this.runRollbacks(completed);
-        throw new Error(`Step ${i} confirmation failed: ${error}`);
+        throw err instanceof NetworkError
+          ? err
+          : new NetworkError(`Step ${i} confirmation failed: ${error}`, { step: i, hash }, err);
       }
 
       this.emit({ index: i, xdr: step.xdr, status: "confirmed", hash });
@@ -147,12 +155,15 @@ export class TransactionQueue {
       const tx = await this.rpc.getTransaction(hash);
       if (tx.status === "SUCCESS") return;
       if (tx.status === "FAILED") {
-        throw new Error(tx.errorResultXdr ?? "transaction FAILED");
+        throw new NetworkError(tx.errorResultXdr ?? "transaction FAILED", { hash });
       }
       // status is "NOT_FOUND" or "PENDING" — keep polling
       await this.sleep(this.pollIntervalMs);
     }
-    throw new Error(`Transaction ${hash} not confirmed after ${this.maxPollAttempts} attempts`);
+    throw new NetworkError(
+      `Transaction ${hash} not confirmed after ${this.maxPollAttempts} attempts`,
+      { hash, attempts: this.maxPollAttempts }
+    );
   }
 
   private async runRollbacks(completedIndices: number[]): Promise<void> {

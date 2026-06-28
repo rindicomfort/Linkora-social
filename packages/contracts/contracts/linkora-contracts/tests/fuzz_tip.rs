@@ -14,15 +14,15 @@ proptest! {
     ) {
         // Verify that amount = author_amount + fee_amount
         // fee_amount = (amount / 10_000) * fee_bps + (amount % 10_000) * fee_bps / 10_000
-        
+
         let fee_amount = (amount / 10_000) * fee_bps as i128
             + (amount % 10_000) * fee_bps as i128 / 10_000;
         let author_amount = amount - fee_amount;
-        
+
         // Amount must split correctly:
         assert_eq!(author_amount + fee_amount, amount,
             "tip split failed: {} + {} != {}", author_amount, fee_amount, amount);
-        
+
         // Fee must be within expected range
         let max_possible_fee = (amount * fee_bps as i128) / 10_000 + 1;
         assert!(fee_amount <= max_possible_fee,
@@ -39,9 +39,9 @@ proptest! {
         let fee_amount = (new_tip / 10_000) * fee_bps as i128
             + (new_tip % 10_000) * fee_bps as i128 / 10_000;
         let author_amount = new_tip - fee_amount;
-        
+
         let updated_tip_total = initial_tips + author_amount;
-        
+
         // Verify no overflow in typical ranges
         assert!(updated_tip_total >= initial_tips,
             "tip_total underflow: {} + {} < {}", initial_tips, author_amount, initial_tips);
@@ -55,7 +55,7 @@ proptest! {
         let fee_amount = (amount / 10_000) * fee_bps as i128
             + (amount % 10_000) * fee_bps as i128 / 10_000;
         let author_amount = amount - fee_amount;
-        
+
         assert_eq!(author_amount, amount,
             "with zero fee, author should get full amount: {} != {}", author_amount, amount);
     }
@@ -68,7 +68,7 @@ proptest! {
         let fee_bps = 10_000u32;
         let fee_amount = (amount / 10_000) * fee_bps as i128
             + (amount % 10_000) * fee_bps as i128 / 10_000;
-        
+
         // Fee should be roughly equal to amount with max bps, ±1 due to rounding
         assert!(fee_amount >= amount - 1 && fee_amount <= amount + 1,
             "max fee {} should be ~{}", fee_amount, amount);

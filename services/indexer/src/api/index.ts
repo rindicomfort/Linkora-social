@@ -27,23 +27,62 @@ export function createApp(db: Database, pg?: PgPool): express.Application {
   const app = express();
   app.use(express.json());
 
-  app.get("/health", (_req: Request, res: Response): void => {
+  const startTime = Date.now();
+  const version = process.env.npm_package_version ?? "0.1.0";
+  const commit = process.env.COMMIT_SHA ?? "unknown";
+
+  // ── Health endpoints ───────────────────────────────────────────────────────
+
+  app.get("/health", async (_req: Request, res: Response): Promise<void> => {
+    const uptime = Math.floor((Date.now() - startTime) / 1000);
     const backfill = getBackfillState();
-    res.json({
-      status: "ok",
-      backfill: backfill.active
-        ? {
-            active: true,
-            fromLedger: backfill.fromLedger,
-            toLedger: backfill.toLedger,
-            processedLedgers: backfill.processedLedgers,
-            totalLedgers:
-              backfill.toLedger !== undefined && backfill.fromLedger !== undefined
-                ? backfill.toLedger - backfill.fromLedger + 1
-                : undefined,
-          }
-        : { active: false },
+
+    // DB check
+    let dbStatus = "disconnected";
+    try {
+      if (pg) { await pg.query("SELECT 1"); dbStatus = "connected"; }
+    } catch { /* keep disconnected */ }
+
+    // RPC check
+    let rpcStatus = "unreachable";
+    try {
+      const rpcUrl = process.env.STELLAR_RPC_URL;
+      if (rpcUrl) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        await fetch(`${rpcUrl}`, { method: "POST", signal: ctrl.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getLatestLedger", params: [] }),
+        }).finally(() => clearTimeout(t));
+        rpcStatus = "reachable";
+      }
+    } catch { /* keep unreachable */ }
+
+    const ok = dbStatus === "connected" && rpcStatus === "reachable";
+    res.status(ok ? 200 : 503).json({
+      status: ok ? "ok" : "degraded",
+      uptime,
+      version,
+      commit,
+      db: dbStatus,
+      rpc: rpcStatus,
+      backfill: backfill.active ? { active: true, fromLedger: backfill.fromLedger, toLedger: backfill.toLedger } : { active: false },
     });
+  });
+
+  // Readiness: ready to serve traffic (DB + RPC up)
+  app.get("/health/ready", async (_req: Request, res: Response): Promise<void> => {
+    try {
+      if (pg) await pg.query("SELECT 1");
+      res.json({ status: "ready" });
+    } catch {
+      res.status(503).json({ status: "not ready", reason: "db unavailable" });
+    }
+  });
+
+  // Liveness: process is alive
+  app.get("/health/live", (_req: Request, res: Response): void => {
+    res.json({ status: "live" });
   });
 
   // Apply rate limiting to all /api routes.

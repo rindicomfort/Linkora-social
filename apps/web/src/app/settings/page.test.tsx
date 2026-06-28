@@ -122,6 +122,7 @@ describe("SettingsPage", () => {
       expect(screen.getByText("Notifications")).toBeInTheDocument();
       expect(screen.getByText("Block List")).toBeInTheDocument();
       expect(screen.getByText("Governance")).toBeInTheDocument();
+      expect(screen.getByText("Keyboard Shortcuts")).toBeInTheDocument();
       expect(screen.getByText("Danger Zone")).toBeInTheDocument();
     });
 

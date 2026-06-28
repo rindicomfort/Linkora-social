@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@/hooks/useWallet";
 import SearchBar from "@/components/SearchBar";
 import { useNotificationsContext } from "@/contexts/NotificationsContext";
 import { PostComposeModal } from "./PostComposeModal";
+import { useKeyboardShortcutsContext } from "@/contexts/KeyboardShortcutsContext";
 
 /** Truncates a Stellar address to G…XXXX format */
 function truncateAddress(address: string): string {
@@ -17,8 +18,22 @@ export function NavBar() {
   const router = useRouter();
   const { address, connected, network, connect, disconnect } = useWallet();
   const { unreadCount } = useNotificationsContext();
+  const { registerComposeHandler, unregisterComposeHandler, registerSearchRef } =
+    useKeyboardShortcutsContext();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showFreighterBanner, setShowFreighterBanner] = useState(false);
+
+  // Ref forwarded to SearchBar so the '/' shortcut can focus the input
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Register/unregister compose handler for the 'n' shortcut
+  useEffect(() => {
+    registerComposeHandler(() => setIsModalOpen(true));
+    registerSearchRef(searchInputRef as React.RefObject<HTMLInputElement | null>);
+    return () => {
+      unregisterComposeHandler();
+    };
+  }, [registerComposeHandler, unregisterComposeHandler, registerSearchRef]);
 
   const handleConnect = useCallback(async () => {
     const hasFreighter =
@@ -76,6 +91,7 @@ export function NavBar() {
         <a
           href="/"
           className="text-xl font-extrabold tracking-tight text-violet-500 hover:text-violet-400 transition-colors"
+          aria-label="Linkora home"
         >
           Linkora
         </a>
@@ -84,6 +100,7 @@ export function NavBar() {
           onSearch={(query) => router.push(`/search?q=${encodeURIComponent(query)}`)}
           placeholder="Search posts and profiles"
           className="w-full max-w-xl sm:flex-1"
+          inputRef={searchInputRef}
         />
 
         {/* Right side */}

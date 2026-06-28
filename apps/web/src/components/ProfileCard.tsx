@@ -45,6 +45,7 @@ export function ProfileCard({ profile }: ProfileCardProps) {
             ? "border border-[var(--border)] text-[var(--foreground)] hover:border-red-500/60 hover:text-red-300"
             : "bg-violet-600 text-white hover:bg-violet-500"
         }`}
+        aria-label={following ? `Unfollow ${displayName}` : `Follow ${displayName}`}
       >
         {following ? "Following" : "Follow"}
       </button>

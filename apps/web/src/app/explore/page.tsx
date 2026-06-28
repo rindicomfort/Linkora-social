@@ -65,13 +65,13 @@ export default function ExplorePage() {
       </div>
 
       {loading && (
-        <div className="text-center py-8">
+        <div className="text-center py-8" aria-live="polite">
           <div className="text-gray-600">Searching posts...</div>
         </div>
       )}
 
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4" role="alert">
           {error}
         </div>
       )}

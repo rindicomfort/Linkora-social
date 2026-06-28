@@ -1,4 +1,5 @@
 import { Signer } from "../types";
+import { SigningError } from "../errors";
 
 declare const window:
   | undefined
@@ -35,8 +36,9 @@ export class FreighterSigner implements Signer {
 
   private getFreighter(): FreighterApi {
     if (typeof window === "undefined" || !window.freighter) {
-      throw new Error(
-        "Freighter extension not found. Please install it from https://www.freighter.app/"
+      throw new SigningError(
+        "Freighter extension not found. Please install it from https://www.freighter.app/",
+        { reason: "extension_not_found" }
       );
     }
     return window.freighter;
@@ -56,8 +58,10 @@ export class FreighterSigner implements Signer {
       this.publicKey = publicKey;
       return publicKey;
     } catch (error) {
-      throw new Error(
-        `Failed to get public key from Freighter: ${error instanceof Error ? error.message : String(error)}`
+      throw new SigningError(
+        `Failed to get public key from Freighter: ${error instanceof Error ? error.message : String(error)}`,
+        { reason: "get_public_key_failed" },
+        error
       );
     }
   }
@@ -82,8 +86,10 @@ export class FreighterSigner implements Signer {
 
       return signedXdr;
     } catch (error) {
-      throw new Error(
-        `Failed to sign transaction with Freighter: ${error instanceof Error ? error.message : String(error)}`
+      throw new SigningError(
+        `Failed to sign transaction with Freighter: ${error instanceof Error ? error.message : String(error)}`,
+        { reason: "sign_rejected" },
+        error
       );
     }
   }

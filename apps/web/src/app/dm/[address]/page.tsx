@@ -220,7 +220,7 @@ export default function DirectMessagePage() {
           </div>
 
           {error && (
-            <div className="mb-4 rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-400">
+            <div className="mb-4 rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-400" role="alert">
               {error}
             </div>
           )}
@@ -277,11 +277,12 @@ export default function DirectMessagePage() {
 
       {/* ── Error banner ────────────────────────────────────────────────── */}
       {error && (
-        <div className="flex shrink-0 items-center justify-between border-b border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-400">
+        <div className="flex shrink-0 items-center justify-between border-b border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-400" role="alert">
           <span>{error}</span>
           <button
             onClick={() => setError(null)}
             className="ml-4 shrink-0 text-xs underline underline-offset-2"
+            aria-label="Dismiss error"
           >
             Dismiss
           </button>
@@ -308,7 +309,7 @@ export default function DirectMessagePage() {
             </div>
           </div>
         ) : (
-          <ul className="space-y-3" aria-label="Messages">
+          <ul className="space-y-3" aria-label="Messages" role="log" aria-live="polite">
             {messages.map((msg, idx) => {
               const isMe = msg.sender === myAddress;
               return (

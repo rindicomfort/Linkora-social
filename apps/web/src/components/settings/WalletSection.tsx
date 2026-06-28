@@ -35,7 +35,7 @@ export function WalletSection() {
             <button
               onClick={() => address && navigator.clipboard.writeText(address)}
               className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg hover:bg-gray-50"
-              title="Copy full address"
+              aria-label="Copy wallet address to clipboard"
             >
               Copy
             </button>

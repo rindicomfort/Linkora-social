@@ -118,7 +118,7 @@ export default function PoolDetailPage() {
 
               {isEmpty && (
                 <div style={styles.emptyBalanceNote}>
-                  <PoolEmptyState variant="zero-balance" />
+                  <PoolEmptyState variant="zero-balance" headingLevel={3} />
                 </div>
               )}
 

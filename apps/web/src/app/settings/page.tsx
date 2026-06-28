@@ -9,6 +9,8 @@ import { BlockListSection } from "@/components/settings/BlockListSection";
 import { GovernanceSection } from "@/components/settings/GovernanceSection";
 import { DangerZoneSection } from "@/components/settings/DangerZoneSection";
 import { ThemeSection } from "@/components/settings/ThemeSection";
+import { OnboardingSettings } from "@/components/settings/OnboardingSettings";
+import { KeyboardShortcutsSection } from "@/components/settings/KeyboardShortcutsSection";
 
 export default function SettingsPage() {
   const { address, connected } = useWallet();
@@ -29,6 +31,9 @@ export default function SettingsPage() {
         {/* Appearance Section */}
         <ThemeSection />
 
+        {/* Onboarding Section */}
+        <OnboardingSettings />
+
         {/* Profile Section */}
         <ProfileSection address={address} />
 
@@ -46,6 +51,9 @@ export default function SettingsPage() {
 
         {/* Governance Section */}
         <GovernanceSection address={address} />
+
+        {/* Keyboard Shortcuts Section */}
+        <KeyboardShortcutsSection />
 
         {/* Danger Zone Section */}
         <DangerZoneSection address={address} />

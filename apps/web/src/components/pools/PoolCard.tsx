@@ -30,7 +30,7 @@ export function PoolCard({ pool, tokenMeta }: PoolCardProps) {
             <span style={styles.poolIcon} aria-hidden="true">
               🏦
             </span>
-            <h3 style={styles.poolId}>{pool.pool_id}</h3>
+            <h2 style={styles.poolId}>{pool.pool_id}</h2>
           </div>
           <StatusBadge isEmpty={isEmpty} />
         </div>

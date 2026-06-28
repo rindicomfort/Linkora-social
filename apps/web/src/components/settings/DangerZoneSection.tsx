@@ -90,9 +90,9 @@ export function DangerZoneSection({ address }: DangerZoneSectionProps) {
 
       {/* Confirmation Dialog */}
       {showConfirmDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-label="Delete profile confirmation">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold mb-2 text-gray-900">Delete Profile?</h3>
+            <h2 className="text-lg font-semibold mb-2 text-gray-900">Delete Profile?</h2>
             <p className="text-sm text-gray-600 mb-4">
               This will permanently delete your profile, posts, and all associated data. This action
               cannot be undone.
@@ -123,7 +123,7 @@ export function DangerZoneSection({ address }: DangerZoneSectionProps) {
             </div>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm" role="alert">
                 {error}
               </div>
             )}

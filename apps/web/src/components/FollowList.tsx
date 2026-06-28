@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { LinkoraClient } from "linkora-sdk";
 import { OptimisticStore } from "@/lib/optimisticStore";
+import { AnimatedList } from "@/components/AnimatedList";
 
 export interface FollowUser {
   address: string;
@@ -204,12 +205,11 @@ export function FollowList({ address, type }: FollowListProps) {
         </div>
       )}
 
-      <ul
-        role="list"
-        aria-label={type === "followers" ? "Followers list" : "Following list"}
+      <AnimatedList
+        items={visibleUsers}
+        getKey={(user) => user.address}
         className="flex flex-col gap-3"
-      >
-        {visibleUsers.map((user) => {
+        renderItem={(user, state) => {
           const isFollowing = OptimisticStore.isFollowing(user.address);
           const isPending = OptimisticStore.isPending(user.address);
           const isMe = currentUser?.toLowerCase() === user.address.toLowerCase();
@@ -219,28 +219,34 @@ export function FollowList({ address, type }: FollowListProps) {
               key={user.address}
               role="listitem"
               tabIndex={0}
-              className="flex items-center gap-4 p-4 bg-white border border-gray-200 rounded-xl hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-sm transition-all"
+              className={`animated-list-item flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer ${
+                state === "entering"
+                  ? "animated-list-item--entering"
+                  : state === "exiting"
+                    ? "animated-list-item--exiting"
+                    : ""
+              }`}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   window.location.href = `/profile/${user.address}`;
                 }
               }}
             >
-              <div className="flex items-center gap-3 w-full">
+              <div className="flex w-full items-center gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={getBlockieSvg(user.address)}
                   alt={`${user.username}'s avatar`}
-                  className="w-10 h-10 rounded-full border border-gray-200 flex-shrink-0"
+                  className="h-10 w-10 flex-shrink-0 rounded-full border border-gray-200"
                 />
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 flex-1">
                   <Link
                     href={`/profile/${user.address}`}
-                    className="block font-semibold text-gray-900 hover:text-indigo-600 truncate"
+                    className="block truncate font-semibold text-gray-900 hover:text-indigo-600"
                   >
                     @{user.username}
                   </Link>
-                  <span className="block text-xs text-gray-500 font-mono truncate">
+                  <span className="block truncate font-mono text-xs text-gray-500">
                     {formatAddress(user.address)}
                   </span>
                 </div>
@@ -252,11 +258,11 @@ export function FollowList({ address, type }: FollowListProps) {
                       handleToggleFollow(user);
                     }}
                     disabled={isPending}
-                    className={`w-full sm:w-auto px-4 py-1.5 rounded-lg font-semibold text-sm transition-all flex-shrink-0 h-[36px] flex items-center justify-center ${
+                    className={`flex h-[36px] w-full flex-shrink-0 items-center justify-center rounded-lg px-4 py-1.5 text-sm font-semibold transition-all sm:w-auto ${
                       isFollowing
-                        ? "bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-250"
+                        ? "border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-250"
                         : "bg-indigo-600 text-white hover:bg-indigo-700"
-                    } ${isPending ? "opacity-55 cursor-not-allowed" : "cursor-pointer"}`}
+                    } ${isPending ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
                     aria-label={
                       isFollowing ? `Unfollow ${user.username}` : `Follow ${user.username}`
                     }
@@ -267,8 +273,8 @@ export function FollowList({ address, type }: FollowListProps) {
               </div>
             </li>
           );
-        })}
-      </ul>
+        }}
+      />
 
       {loading && (
         <div className="flex items-center justify-center gap-2 p-6" aria-live="polite">

@@ -71,8 +71,8 @@ export default function PostDetailPage() {
   if (notFound || error || !post) {
     return (
       <main className="max-w-xl mx-auto px-4 py-12 flex flex-col gap-6 text-center">
-        <div className="text-5xl">🔍</div>
-        <h2 className="text-2xl font-bold text-white">Post Not Found</h2>
+        <div className="text-5xl" aria-hidden="true">🔍</div>
+        <h1 className="text-2xl font-bold text-white">Post Not Found</h1>
         <p className="text-[var(--text-muted)]">
           {error
             ? `Error: ${error}`
@@ -94,6 +94,7 @@ export default function PostDetailPage() {
         ← Back to Explore
       </Link>
 
+      <h1 className="sr-only">Post Detail</h1>
       <article className="bg-[var(--muted)] border border-[var(--border)] rounded-2xl p-6 shadow-xl flex flex-col gap-4">
         {/* Author */}
         <div className="flex items-center gap-3">

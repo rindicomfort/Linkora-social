@@ -152,7 +152,7 @@ function AppNavigator() {
           },
           headerTintColor: "#f8fafc",
           headerRight: () => <HeaderActions />,
-          tabBarActiveTintColor: "#6366f1",
+          tabBarActiveTintColor: theme.colors.brand.accent,
           tabBarInactiveTintColor: "#9ca3af",
           tabBarStyle: {
             backgroundColor: "#0f172a",

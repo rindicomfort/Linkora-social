@@ -62,5 +62,5 @@ export interface Signer {
    * @param tx The transaction to sign
    * @param derivationPath Optional derivation path for hardware wallets
    */
-  signTransaction(tx: any, derivationPath?: string): Promise<any>;
+  signTransaction(tx: string | TransactionLike, derivationPath?: string): Promise<unknown>;
 }

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-var-requires */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports */
 const mockFreighterSign = jest.fn();
 const mockFreighterGetPublicKey = jest.fn();
 
